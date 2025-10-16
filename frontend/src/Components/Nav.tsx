@@ -33,6 +33,9 @@ export default function Nav() {
           <NavLink to="/sales" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>
             Sales
           </NavLink>
+          <NavLink to="/logs" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>
+            Logs
+          </NavLink>
           <NavLink to="/csv" className={({ isActive }) => `${link} ${isActive ? active : ""}`}>
             CSV Import
           </NavLink>
