@@ -49,7 +49,7 @@ export default function Nav() {
               `${link} flex items-center gap-2 ${isActive ? active : ""}`
             }
           >
-            <span>Settings</span>
+            <span>Login</span>
             <span aria-hidden>⚙️</span>
           </NavLink>
         </div>

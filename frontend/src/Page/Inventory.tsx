@@ -125,6 +125,7 @@ export default function Inventory() {
               </button>
 
               <AnimatePresence>
+                //TODO: when opening other dropdowns don't close previous
                 {openCategory === group.category && (
                   <motion.div
                     initial={{ height: 0, opacity: 0 }}

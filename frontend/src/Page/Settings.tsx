@@ -17,7 +17,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-semibold">Settings</h1>
+      <h1 className="text-3xl font-semibold">Login</h1>
 
       <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-2xl p-6 shadow-sm max-w-lg space-y-6">
         <div>
