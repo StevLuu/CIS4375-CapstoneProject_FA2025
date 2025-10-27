@@ -1,3 +1,4 @@
+SET search_path = public;
 -- Enable case-insensitive text for email
 --CREATE EXTENSION IF NOT EXISTS citext;
 -- ran first and seperately as DB superuser bc of privilage error
