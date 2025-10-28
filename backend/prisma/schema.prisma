@@ -99,15 +99,14 @@ model log_item {
 }
 
 model user {
-  user_id         Int      @id @default(autoincrement())
-  squareUsername  String?  @map("username") @db.VarChar(255)
-  password        String   @db.VarChar(255)
-  email           String   @unique @db.Citext
-  created_at      DateTime @default(now()) @db.Timestamp(6)
-  updated_at      DateTime @default(now()) @db.Timestamp(6)
-  item            item[]
-  log             log[]
+  user_id        Int      @id @default(autoincrement())
+  squareUsername String?  @map("username") @db.VarChar(255)
+  password       String   @db.VarChar(255)
+  email          String   @unique @db.Citext
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+  updated_at     DateTime @default(now()) @db.Timestamp(6)
+  item           item[]
+  log            log[]
 
   @@map("user")
 }
-
