@@ -9,25 +9,38 @@ datasource db {
 }
 
 model category {
-  category_id        Int             @id @default(autoincrement())
-  category_name      String          @db.VarChar(255)
+  category_id        Int    @id @default(autoincrement())
+  user_id            Int
+  category_name      String @db.Citext // case-insensitive
   parent_category_id Int?
-  category           category?       @relation("categoryTocategory", fields: [parent_category_id], references: [category_id], onUpdate: NoAction)
-  other_category     category[]      @relation("categoryTocategory")
-  category_item      category_item[]
 
-  @@index([parent_category_id], map: "idx_category_parent")
+  // Relations
+  user user @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  // Parent-child within same user
+  parent   category?  @relation("CategoryToCategory", fields: [parent_category_id, user_id], references: [category_id, user_id], onUpdate: NoAction)
+  children category[] @relation("CategoryToCategory")
+
+  category_item category_item[]
+
+  // Constraints and indexes
+  @@unique([category_id, user_id], map: "ux_category_id_user") // lets others FK to (category_id, user_id)
+  @@unique([user_id, parent_category_id, category_name], map: "ux_sibling_name_ci") // no dup names under same parent for a user
+  @@index([user_id, parent_category_id], map: "idx_category_user_parent")
+  @@index([user_id, category_name], map: "idx_category_user_name")
 }
 
 model category_item {
   category_id Int
-  sku         String   @db.VarChar(50)
+  sku         String @db.VarChar(50)
   user_id     Int
-  category    category @relation(fields: [category_id], references: [category_id], onDelete: Cascade, onUpdate: NoAction)
-  item        item     @relation(fields: [sku, user_id], references: [sku, user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  // Relations (tenant-safe via composite FKs)
+  category category @relation(fields: [category_id, user_id], references: [category_id, user_id], onDelete: Cascade, onUpdate: NoAction)
+  item     item     @relation(fields: [sku, user_id], references: [sku, user_id], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([category_id, sku, user_id])
-  @@index([category_id], map: "idx_category_item_cat")
+  @@index([category_id, user_id], map: "idx_category_item_cat_user")
   @@index([sku, user_id], map: "idx_category_item_item")
 }
 
@@ -105,8 +118,13 @@ model user {
   email          String   @unique @db.Citext
   created_at     DateTime @default(now()) @db.Timestamp(6)
   updated_at     DateTime @default(now()) @db.Timestamp(6)
-  item           item[]
-  log            log[]
+
+  // existing relations
+  item item[]
+  log  log[]
+
+  // NEW: back-relation for category.user
+  category category[]
 
   @@map("user")
 }
