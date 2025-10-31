@@ -1,8 +1,14 @@
 import "express";
-import { AuthTokenPayload } from "../middleware/requireAuth";
 
-declare module "express-serve-static-core" {
-  interface Request {
-    user?: AuthTokenPayload;
+declare global {
+  namespace Express {
+    interface UserSession {
+      user_id: number;
+      email: string;
+      squareUsername: string | null;
+    }
+    interface Request {
+      user?: UserSession;
+    }
   }
 }

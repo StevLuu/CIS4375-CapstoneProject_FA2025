@@ -1,14 +1,13 @@
-import express from "express";
+import { Router } from "express";
 import { z } from "zod";
 import argon2 from "argon2";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../services/prisma";
 import jwt from "jsonwebtoken";
-import type { Request, Response, NextFunction } from "express";
+// import type { Request, Response, NextFunction } from "express";
 import { AuthTokenPayload, requireAuth } from "../middleware/requireAuth";
 
+const router = Router();
 
-const prisma = new PrismaClient();
-const router = express.Router();
 
 // Zod schema for validation
 const signupSchema = z.object({
@@ -22,22 +21,6 @@ const loginSchema = z.object({
     email: z.string().email().max(254),
     password: z.string().min(8).max(128),
 });
-
-
-// export function requireAuth(req: Request, res: Response, next: NextFunction) {
-//     const cookieName = process.env.SESSION_COOKIE_NAME || "sid";
-//     const token = req.cookies?.[cookieName];
-//     if (!token) return res.status(401).json({ error: "Unauthorized" });
-
-//     try {
-//         const payload = jwt.verify(token, process.env.SESSION_SECRET!);
-//         // attach to req for later use
-//         (req as any).auth = payload;
-//         next();
-//     } catch {
-//         return res.status(401).json({ error: "Unauthorized" });
-//     }
-// }
 
 
 // POST /auth/signup
@@ -157,16 +140,29 @@ router.post("/logout", (req, res) => {
 });
 
 
-// test route for requireAuth
+// /auth/me (protected)
 router.get("/me", requireAuth, async (req, res) => {
-    const auth = (req as any).user as AuthTokenPayload | undefined;
-    if (!auth?.sub) return res.status(401).json({ error: "Not authenticated" });
-  
+    const userId = req.user!.user_id;
+
     const me = await prisma.user.findUnique({
-      where: { user_id: Number(auth.sub) },
-      select: { user_id: true, email: true, squareUsername: true, created_at: true },
+        where: { user_id: userId },
+        select: { user_id: true, email: true, squareUsername: true, created_at: true },
     });
+
     if (!me) return res.status(404).json({ error: "User not found" });
     res.json({ user: me });
-  });
+});
+
+// /health
+// Usually health is PUBLIC so uptime checks don’t need auth.
+// If you want a protected health, keep requireAuth and still use req.user.
+router.get("/health", (_req, res) => {
+    res.json({ ok: true, time: new Date().toISOString() });
+});
+
+// Protected variant (optional)
+router.get("/health/authed", requireAuth, (req, res) => {
+    res.json({ ok: true, user_id: req.user!.user_id, time: new Date().toISOString() });
+});
+
 export default router;
