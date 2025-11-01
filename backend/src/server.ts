@@ -5,6 +5,7 @@ import helmet from "helmet";
 import authRoutes from "./routes/auth";
 import cookieParser from "cookie-parser";
 import itemsRouter from "./routes/items";
+import categoriesRouter from "./routes/categories";
 
 const app = express();
 app.use(express.json());
@@ -22,6 +23,7 @@ app.use(
   
 app.use("/auth", authRoutes);
 app.use("/items", itemsRouter);
+app.use("/categories", categoriesRouter);
 
 
 const PORT = process.env.PORT || 4000;
