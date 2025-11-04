@@ -6,6 +6,7 @@ import authRoutes from "./routes/auth";
 import cookieParser from "cookie-parser";
 import itemsRouter from "./routes/items";
 import categoriesRouter from "./routes/categories";
+import logsRouter from "./routes/logs";
 
 const app = express();
 app.use(express.json());
@@ -24,6 +25,7 @@ app.use(
 app.use("/auth", authRoutes);
 app.use("/items", itemsRouter);
 app.use("/categories", categoriesRouter);
+app.use("/logs", logsRouter);
 
 
 const PORT = process.env.PORT || 4000;

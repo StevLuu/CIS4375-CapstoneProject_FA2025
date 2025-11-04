@@ -73,7 +73,6 @@ model item {
   option_name_1                 String?         @db.VarChar(100)
   option_value_1                String?         @db.VarChar(100)
   current_quantity              Int?            @default(0)
-  new_quantity                  Int?
   stock_alert_enabled           String?         @default("N") @db.Char(1)
   stock_alert_count             Int?
   modifier                      String?         @db.VarChar(100)
@@ -90,7 +89,9 @@ model log {
   timestamp DateTime   @default(now()) @db.Timestamp(6)
   user_id   Int
   type      String?    @db.VarChar(100)
+  note      String?    @db.VarChar(500) // Optional note for readable context
   user      user       @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+  // log_item  log_item[] // removed to keeps logs durable after an item is deleted.
   log_item  log_item[]
 
   @@index([user_id, timestamp], map: "idx_log_user_ts")
@@ -101,12 +102,15 @@ model log_item {
   sku      String @db.VarChar(50)
   user_id  Int
   quantity Int    @default(0)
-  log      log    @relation(fields: [log_id], references: [log_id], onDelete: Cascade, onUpdate: NoAction)
-  item     item   @relation(fields: [sku, user_id], references: [sku, user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  // only keep relation to log
+  log         log     @relation(fields: [log_id], references: [log_id], onDelete: Cascade, onUpdate: NoAction)
+  item        item?   @relation(fields: [itemSku, itemUser_id], references: [sku, user_id])
+  itemSku     String? @db.VarChar(50)
+  itemUser_id Int?
 
   @@id([log_id, sku, user_id])
   @@index([sku, user_id], map: "idx_log_item_item")
-  @@index([log_id], map: "idx_log_item_log")
 }
 
 model user {
