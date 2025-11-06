@@ -110,7 +110,7 @@ backend/.env.production.local
 backend/.env.test.local
 backend/logs/
 backend/tmp/
-
+backend/cookie.txt
 # ----------------------------------------------------------
 # Misc / Tooling
 # ----------------------------------------------------------
