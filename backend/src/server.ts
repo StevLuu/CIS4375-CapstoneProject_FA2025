@@ -14,13 +14,17 @@ app.use(helmet());
 app.use(cookieParser(process.env.SESSION_SECRET));
 //app.use(cors());
 
-//for dev
-app.use(
-    cors({
-      origin: ["http://localhost:5173"], // your React dev server
-      credentials: true,                 // allow cookies to be sent
-    })
-  );
+const raw = process.env.FRONTEND_ORIGINS || "http://localhost:5173";
+const ALLOW = raw.split(",").map(s => s.trim());
+
+app.use(cors({
+  origin(origin, cb) {
+    // allow same-origin or tools like Postman (no Origin header)
+    if (!origin) return cb(null, true);
+    return cb(null, ALLOW.includes(origin));
+  },
+  credentials: true,
+}));
   
 app.use("/auth", authRoutes);
 app.use("/items", itemsRouter);

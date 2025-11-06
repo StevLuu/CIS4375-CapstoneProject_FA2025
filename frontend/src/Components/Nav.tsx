@@ -1,10 +1,13 @@
 // src/components/Nav.tsx
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../Components/auth/useAuth";
 
 export default function Nav() {
   const link =
     "px-3 py-2 rounded-full border text-sm hover:bg-neutral-100 transition";
   const active = "bg-neutral-900 text-white";
+  const { loggedIn, user } = useAuth();
+  const label = loggedIn ? (user?.squareUsername || user?.email || "Account") : "Login";
 
   return (
     <header className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
@@ -46,10 +49,10 @@ export default function Nav() {
           <NavLink
             to="/settings"
             className={({ isActive }) =>
-              `${link} flex items-center gap-2 ${isActive ? active : ""}`
+              `px-3 py-2 rounded-full border text-sm hover:bg-neutral-100 transition flex items-center gap-2 ${isActive ? "bg-neutral-900 text-white" : ""}`
             }
           >
-            <span>Login</span>
+            <span>{label}</span>
             <span aria-hidden>⚙️</span>
           </NavLink>
         </div>

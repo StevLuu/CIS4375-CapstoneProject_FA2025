@@ -135,23 +135,48 @@ router.post("/login", async (req, res) => {
 // POST /auth/logout
 router.post("/logout", (req, res) => {
     const cookieName = process.env.SESSION_COOKIE_NAME || "sid";
-    res.clearCookie(cookieName, { path: "/" });
-    res.json({ message: "Logged out" });
+    res.clearCookie(cookieName, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+    });
+    return res.json({ message: "Logged out" });
 });
 
 
 // /auth/me (protected)
-router.get("/me", requireAuth, async (req, res) => {
-    const userId = req.user!.user_id;
+// routes/auth.ts
+router.get("/me", (req, res) => {
+    const cookieName = process.env.SESSION_COOKIE_NAME || "sid";
+    const token = req.signedCookies?.[cookieName] || req.cookies?.[cookieName];
+    if (!token) return res.sendStatus(401);
+  
+    try {
+      const payload = jwt.verify(token, process.env.SESSION_SECRET! ) as {
+        sub: string; email: string; squareUsername: string | null;
+      };
+      return res.json({
+        loggedIn: true,
+        user: { email: payload.email, squareUsername: payload.squareUsername },
+      });
+    } catch {
+      return res.sendStatus(401);
+    }
+  });
 
-    const me = await prisma.user.findUnique({
-        where: { user_id: userId },
-        select: { user_id: true, email: true, squareUsername: true, created_at: true },
-    });
+// router.get("/auth/me", (req, res) => {
+//     const token = req.cookies.sid;
+//     if (!token) return res.sendStatus(401);
+//     try {
+//       const data = jwt.verify(token, process.env.SESSION_SECRET!);
+//       // data contains email, squareUsername
+//       res.json({ loggedIn: true, user: data });
+//     } catch {
+//       res.sendStatus(401);
+//     }
+//   });
 
-    if (!me) return res.status(404).json({ error: "User not found" });
-    res.json({ user: me });
-});
 
 // /health
 // Usually health is PUBLIC so uptime checks don’t need auth.
