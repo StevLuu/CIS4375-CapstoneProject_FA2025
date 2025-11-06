@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useAuth } from "../Components/auth/useAuth";
+import { LoginModal } from "../Components/auth/LoginModal";
 
 const mockLogs = [
   {
@@ -33,6 +35,12 @@ const mockLogs = [
 ];
 
 export default function Logs() {
+  const { loggedIn, user, refresh } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
+  useEffect(() => {
+    if (!loggedIn || !user?.email) setShowLogin(true);
+  }, [loggedIn, user]);
+
   const [filter, setFilter] = useState("All");
 
   const filteredLogs =
@@ -41,12 +49,21 @@ export default function Logs() {
       : mockLogs.filter((log) => log.status === filter);
 
   return (
+    
     <motion.div
       className="space-y-8"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.6 }}
     >
+      <LoginModal
+        open={showLogin}
+        onClose={() => setShowLogin(false)}
+        onSuccess={async () => {
+          setShowLogin(false);
+          await refresh();
+        }}
+      />
       <h1 className="text-3xl font-semibold">System Logs</h1>
       <p className="text-neutral-500">
         Recent system activity, imports, and updates. (Demo data)

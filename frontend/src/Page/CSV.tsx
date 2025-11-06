@@ -1,7 +1,15 @@
 // src/pages/CSV.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAuth } from "../Components/auth/useAuth";
+import { LoginModal } from "../Components/auth/LoginModal";
 
 export default function CSV() {
+  const { loggedIn, user, refresh } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
+  useEffect(() => {
+    if (!loggedIn || !user?.email) setShowLogin(true);
+  }, [loggedIn, user]);
+
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<string>("");
 
@@ -23,7 +31,15 @@ export default function CSV() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
+      <LoginModal
+        open={showLogin}
+        onClose={() => setShowLogin(false)}
+        onSuccess={async () => {
+          setShowLogin(false);
+          await refresh();
+        }}
+      />
       <h1 className="text-3xl font-semibold">CSV Import</h1>
       <p className="text-neutral-500">
         Upload inventory data exported from Etsy or Square (mock demo).
@@ -52,13 +68,12 @@ export default function CSV() {
 
         {status && (
           <p
-            className={`text-sm ${
-              status.startsWith("✅")
+            className={`text-sm ${status.startsWith("✅")
                 ? "text-green-600"
                 : status.startsWith("⏳")
-                ? "text-yellow-600"
-                : "text-red-600"
-            }`}
+                  ? "text-yellow-600"
+                  : "text-red-600"
+              }`}
           >
             {status}
           </p>

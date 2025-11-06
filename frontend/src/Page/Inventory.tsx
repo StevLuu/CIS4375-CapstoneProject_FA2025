@@ -1,6 +1,9 @@
 // src/Page/Inventory.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "../Components/auth/useAuth";
+import { LoginModal } from "../Components/auth/LoginModal";
+
 
 const mockItems = [
   { sku: "A001", name: "Glitter Keychain", stock: 12, price: 5 },
@@ -35,6 +38,13 @@ const mockCategories = [
 ];
 
 export default function Inventory() {
+  const { loggedIn, user, refresh } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
+
+  useEffect(() => {
+    if (!loggedIn || !user?.email) setShowLogin(true);
+  }, [loggedIn, user]);
+  
   const [search, setSearch] = useState("");
   const [openCategory, setOpenCategory] = useState<string | null>(null);
 
@@ -44,8 +54,21 @@ export default function Inventory() {
       item.sku.toLowerCase().includes(search.toLowerCase())
   );
 
+
+
   return (
+
+
     <div className="space-y-10">
+      <LoginModal
+        open={showLogin}
+        onClose={() => setShowLogin(false)}
+        onSuccess={async () => {
+          setShowLogin(false);
+          await refresh();
+        }}
+      />
+
       {/* Header */}
       <div>
         <h1 className="text-3xl font-semibold">Inventory</h1>
@@ -83,9 +106,8 @@ export default function Inventory() {
               <p className="text-sm text-neutral-600 mb-2">
                 Stock:{" "}
                 <span
-                  className={`font-medium ${
-                    item.stock <= 5 ? "text-red-600" : "text-green-600"
-                  }`}
+                  className={`font-medium ${item.stock <= 5 ? "text-red-600" : "text-green-600"
+                    }`}
                 >
                   {item.stock}
                 </span>
@@ -150,11 +172,10 @@ export default function Inventory() {
                           >
                             <td className="py-2">{item.name}</td>
                             <td
-                              className={`py-2 font-medium ${
-                                item.stock <= 5
-                                  ? "text-red-600"
-                                  : "text-green-600"
-                              }`}
+                              className={`py-2 font-medium ${item.stock <= 5
+                                ? "text-red-600"
+                                : "text-green-600"
+                                }`}
                             >
                               {item.stock}
                             </td>
