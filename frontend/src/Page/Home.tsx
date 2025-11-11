@@ -1,7 +1,14 @@
 import { motion } from "framer-motion";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../Components/auth/useAuth";
 
 export default function Home() {
+  const { loggedIn, user } = useAuth();
+  const label = loggedIn ? (user?.squareUsername) : "Login";
+  function capitalize(str?: string | null) {
+    if (!str) return "";
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
   return (
     <div className="text-center space-y-10 py-16">
       <motion.div
@@ -15,11 +22,18 @@ export default function Home() {
           className="mx-auto h-24 mb-6"
         />
         <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-          Xiiyta Inventory Management System
+          {label ? `${capitalize(label)}'s` : "Your"} Inventory Management System
         </h1>
         <p className="text-neutral-500 max-w-xl mx-auto mt-4">
           A cloud-based platform that helps small businesses like{" "}
-          <span className="font-semibold text-neutral-800">Xiiyta</span> manage
+          <a
+            href="https://xiiyta.carrd.co/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-neutral-800 hover:underline"
+          >
+            Xiiyta
+          </a> manage
           inventory across Etsy, Square, and in-person markets.
         </p>
       </motion.div>

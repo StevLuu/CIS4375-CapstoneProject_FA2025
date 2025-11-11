@@ -1,6 +1,10 @@
 // src/pages/Dashboard.tsx
-
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { useAuth } from "../Components/auth/useAuth";
+import { LoginModal } from "../Components/auth/LoginModal";
+import { useState, useEffect } from "react";
+
+
 
 const data = [
   { name: "Mon", sales: 120 },
@@ -11,8 +15,21 @@ const data = [
 ];
 
 export default function Dashboard() {
+  const { loggedIn, user, refresh } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
+  useEffect(() => {
+    if (!loggedIn || !user?.email) setShowLogin(true);
+  }, [loggedIn, user]);
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
+      <LoginModal
+        open={showLogin}
+        onClose={() => setShowLogin(false)}
+        onSuccess={async () => {
+          setShowLogin(false);
+          await refresh();
+        }}
+      />
       <h1 className="text-3xl font-semibold">Vendor Dashboard</h1>
       <p className="text-neutral-500">
         Snapshot of weekly performance. (Mock data for presentation)
