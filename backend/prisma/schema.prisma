@@ -82,6 +82,8 @@ model item {
 
   @@id([sku, user_id])
   @@index([user_id], map: "idx_item_user")
+  // TODO: add index on (user_id, archived) to accelerate archived filters later
+
 }
 
 model log {

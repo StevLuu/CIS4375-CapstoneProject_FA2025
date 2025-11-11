@@ -81,7 +81,7 @@ error.log
 coverage/
 *.lcov
 jest-results.json
-
+cookie.txt
 # ----------------------------------------------------------
 # Lockfiles (keep the real ones next to package.json)
 # ----------------------------------------------------------
