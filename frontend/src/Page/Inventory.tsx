@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "../Components/ui/Modal";
 import { useAuth } from "../Components/auth/useAuth";
 import { LoginModal } from "../Components/auth/LoginModal";
-import { api } from "../lib/api";
+import { api, clampSeed, formatSku, nextSku } from "../lib/api";
 
 /* ===== Types ===== */
 export type CategoryNode = {
@@ -910,37 +910,212 @@ function CategoryEditModal(props: {
 
 
 /* ===== Add item and single edit ===== */
-function AddItemForm(props: { onCancel: () => void; onSave: (p: { sku: string; item_name: string; description?: string | null; current_quantity?: number; price?: number | null; online_sale_price?: number | null; }) => Promise<void>; }) {
+function AddItemForm(props: {
+  onCancel: () => void;
+  onSave: (p: {
+    sku: string;
+    item_name: string;
+    description?: string | null;
+    current_quantity?: number;
+    price?: number | null;
+    online_sale_price?: number | null;
+  }) => Promise<void>;
+}) {
   const { onCancel, onSave } = props;
-  const [f, setF] = useState({ sku: "", item_name: "", description: "", qty: "", price: "", online_sale_price: "" });
-  const [saving, setSaving] = useState(false); const [err, setErr] = useState<string | null>(null);
+
+  const [f, setF] = useState({
+    sku: "",
+    item_name: "",
+    description: "",
+    qty: "",
+    price: "",
+    online_sale_price: "",
+  });
+
+  // Auto SKU controls
+  const [autoSku, setAutoSku] = useState(true);
+  const [seedMode, setSeedMode] = useState<"name" | "custom">("name");
+  const [seedInput, setSeedInput] = useState("");
+  const counterRef = useRef(0);
+
+  // compute current seed
+  const seed = useMemo(() => {
+    if (seedMode === "custom" && seedInput.trim()) return clampSeed(seedInput);
+    return clampSeed(f.item_name);
+  }, [seedMode, seedInput, f.item_name]);
+
+  // regenerate SKU when auto mode or seed changes
+  useEffect(() => {
+    if (!autoSku) return;
+    setF((cur) => ({ ...cur, sku: formatSku(seed, counterRef.current) }));
+  }, [autoSku, seed]);
+
+  // simple increment helper
+  const bumpSku = () => {
+    counterRef.current = (counterRef.current + 1) % 10000;
+    const next = formatSku(seed, counterRef.current);
+    setF((cur) => ({ ...cur, sku: next }));
+    return next;
+  };
+
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
   return (
     <form
-      onSubmit={async e => {
-        e.preventDefault(); setSaving(true); setErr(null);
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        setErr(null);
+
+        // ensure SKU present
+        let sku = f.sku.trim().toUpperCase();
+        if (autoSku && !/^[A-Z]{3}\d{4}$/.test(sku)) {
+          sku = formatSku(seed, counterRef.current);
+          setF((cur) => ({ ...cur, sku }));
+        }
+
+        const payload = {
+          sku,
+          item_name: f.item_name.trim(),
+          description: f.description.trim() || null,
+          current_quantity: f.qty ? Number(f.qty) : 0,
+          price: f.price ? Number(f.price) : null,
+          online_sale_price: f.online_sale_price ? Number(f.online_sale_price) : null,
+        };
+
         try {
-          await onSave({
-            sku: f.sku.trim(), item_name: f.item_name.trim(),
-            description: f.description.trim() || null,
-            current_quantity: f.qty ? Number(f.qty) : 0,
-            price: f.price ? Number(f.price) : null,
-            online_sale_price: f.online_sale_price ? Number(f.online_sale_price) : null,
-          });
-        } catch (e: any) { setErr(e?.message || "Failed to add item"); } finally { setSaving(false); }
-      }} className="grid gap-3"
+          // try up to 5 times on duplicate
+          const MAX_TRIES = 5;
+          for (let i = 0; i < MAX_TRIES; i++) {
+            try {
+              await onSave(payload);
+              setSaving(false);
+              return;
+            } catch (e: any) {
+              // detect duplicate by status if available or by message text
+              const status = e?.status ?? e?.response?.status;
+              const msg = String(e?.message || "");
+              const isConflict = status === 409 || /already exists|duplicate|conflict/i.test(msg);
+              if (autoSku && isConflict) {
+                payload.sku = i === 0 ? nextSku(payload.sku) : bumpSku();
+                continue;
+              }
+              throw e;
+            }
+          }
+          // final attempt bump once more
+          payload.sku = bumpSku();
+          await onSave(payload);
+        } catch (e: any) {
+          setErr(e?.message || "Failed to add item");
+        } finally {
+          setSaving(false);
+        }
+      }}
+      className="grid gap-3"
     >
-      <input className="input" placeholder="SKU" value={f.sku} onChange={e => setF({ ...f, sku: e.target.value })} required />
-      <input className="input" placeholder="Name" value={f.item_name} onChange={e => setF({ ...f, item_name: e.target.value })} required />
-      <textarea className="input" placeholder="Description" value={f.description} onChange={e => setF({ ...f, description: e.target.value })} />
+      {/* Auto SKU controls */}
+      <div className="rounded-xl border p-3 space-y-2">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={autoSku}
+            onChange={(ev) => setAutoSku(ev.target.checked)}
+          />
+          Auto generate SKU (AAA0000)
+        </label>
+
+        <div className={`grid gap-2 ${autoSku ? "opacity-100" : "opacity-50"}`}>
+          <div className="flex items-center gap-4">
+            <span className="text-sm">Seed</span>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="radio"
+                name="seedMode"
+                checked={seedMode === "name"}
+                onChange={() => setSeedMode("name")}
+              />
+              From name
+            </label>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="radio"
+                name="seedMode"
+                checked={seedMode === "custom"}
+                onChange={() => setSeedMode("custom")}
+              />
+              Custom
+            </label>
+            <input
+              className="input w-24"
+              placeholder="ABC"
+              value={seedInput}
+              onChange={(e) => setSeedInput(e.target.value)}
+              disabled={seedMode !== "custom"}
+            />
+          </div>
+          <div className="text-xs text-neutral-600">
+            Seed uses first three letters. Non letters are removed.
+          </div>
+        </div>
+      </div>
+
+      <input
+        className="input"
+        placeholder="SKU"
+        value={f.sku}
+        onChange={(e) => setF({ ...f, sku: e.target.value.toUpperCase() })}
+        required
+        disabled={autoSku}
+      />
+      <input
+        className="input"
+        placeholder="Name"
+        value={f.item_name}
+        onChange={(e) => setF({ ...f, item_name: e.target.value })}
+        required
+      />
+      <textarea
+        className="input"
+        placeholder="Description"
+        value={f.description}
+        onChange={(e) => setF({ ...f, description: e.target.value })}
+      />
       <div className="grid grid-cols-3 gap-3">
-        <input className="input" type="number" placeholder="Qty" value={f.qty} onChange={e => setF({ ...f, qty: e.target.value })} />
-        <input className="input" type="number" step="0.01" placeholder="Price" value={f.price} onChange={e => setF({ ...f, price: e.target.value })} />
-        <input className="input" type="number" step="0.01" placeholder="Online sale price" value={f.online_sale_price} onChange={e => setF({ ...f, online_sale_price: e.target.value })} />
+        <input
+          className="input"
+          type="number"
+          placeholder="Qty"
+          value={f.qty}
+          onChange={(e) => setF({ ...f, qty: e.target.value })}
+        />
+        <input
+          className="input"
+          type="number"
+          step="0.01"
+          placeholder="Price"
+          value={f.price}
+          onChange={(e) => setF({ ...f, price: e.target.value })}
+        />
+        <input
+          className="input"
+          type="number"
+          step="0.01"
+          placeholder="Online sale price"
+          value={f.online_sale_price}
+          onChange={(e) => setF({ ...f, online_sale_price: e.target.value })}
+        />
       </div>
       {err && <p className="text-sm text-red-600">{err}</p>}
       <div className="flex justify-end gap-2 mt-2">
-        <button className="btn" type="button" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" disabled={saving} type="submit">{saving ? "Saving…" : "Save"}</button>
+        <button className="btn" type="button" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+        <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" disabled={saving} type="submit">
+          {saving ? "Saving…" : "Save"}
+        </button>
       </div>
     </form>
   );

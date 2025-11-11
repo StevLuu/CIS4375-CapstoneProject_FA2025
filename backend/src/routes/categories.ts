@@ -83,6 +83,108 @@ async function assertParentValid(userId: number, parentId?: number | null) {
     }
 }
 
+// Body: { paths: string[] }  ->  { ok: Array<{ path: string, leaf_category_id: number }>, failed: string[] }
+router.post("/ensure-paths", async (req, res, next) => {
+    try {
+        const userId = req.user!.user_id;
+        const raw: string[] = Array.isArray(req.body?.paths) ? req.body.paths : [];
+        if (!raw.length) return res.status(400).json({ error: "paths is required" });
+
+        const uniq = Array.from(new Set(raw.map(String)));
+
+        type Leaf = { path: string; leaf_category_id: number };
+        const out: Leaf[] = [];
+        const failed: string[] = [];
+
+        await prisma.$transaction(async (tx) => {
+            for (const path of uniq) {
+                try {
+                    // ensure strong typing on segments
+                    const segments: string[] = path
+                        .split(">")
+                        .map((s) => s.replace(/[›]/g, ">"))
+                        .map((s) => s.trim())
+                        .filter((s): s is string => Boolean(s)); // TS type guard
+
+                    if (!segments.length) {
+                        failed.push(path);
+                        continue;
+                    }
+
+                    let parentId: number | null = null;
+
+                    for (const name of segments) {
+                        // explicit selection type to satisfy TS
+                        type CatSel = { category_id: number };
+
+                        const existing: CatSel | null = await tx.category.findFirst({
+                            where: {
+                                user_id: userId,
+                                category_name: name,
+                                // pass undefined when null to match your Prisma schema
+                                parent_category_id: parentId ?? undefined,
+                            },
+                            select: { category_id: true },
+                        });
+
+                        if (existing) {
+                            parentId = existing.category_id;
+                            continue;
+                        }
+
+                        const created: CatSel = await tx.category.create({
+                            data: {
+                                user_id: userId,
+                                category_name: name,
+                                parent_category_id: parentId,
+                            },
+                            select: { category_id: true },
+                        });
+
+                        parentId = created.category_id;
+                    }
+
+                    out.push({ path, leaf_category_id: parentId as number });
+                } catch {
+                    failed.push(path);
+                }
+            }
+        });
+
+        res.json({ ok: out, failed });
+    } catch (err) {
+        next(err);
+    }
+});
+
+
+// POST /categories/assign
+// Body: { pairs: Array<{ sku: string, category_ids: number[] }> }
+// Effect: link each sku to each category_id with skipDuplicates. Does not remove prior links.
+router.post("/assign", async (req, res, next) => {
+    try {
+        const userId = req.user!.user_id;
+        const pairs: Array<{ sku: string; category_ids: number[] }> = Array.isArray(req.body?.pairs)
+            ? req.body.pairs
+            : [];
+        if (!pairs.length) return res.status(400).json({ error: "pairs is required" });
+
+        const data = [];
+        for (const p of pairs) {
+            const sku = String(p.sku).trim();
+            if (!sku || !Array.isArray(p.category_ids)) continue;
+            for (const cid of p.category_ids) {
+                if (Number.isInteger(cid)) data.push({ category_id: cid, sku, user_id: userId });
+            }
+        }
+        if (!data.length) return res.json({ linked: 0 });
+
+        await prisma.category_item.createMany({ data, skipDuplicates: true });
+        res.json({ linked: data.length });
+    } catch (err) {
+        next(err);
+    }
+});
 
 // GET /items/uncategorized?archived=exclude|include|only&q=&limit=&cursor=
 router.get("/uncategorized", async (req, res, next) => {
@@ -174,6 +276,29 @@ async function assertNoCycle(userId: number, currentId: number, newParentId?: nu
         throw err;
     }
 }
+
+router.get("/categories/list-for-export", requireAuth, async (req, res) => {
+    const userId = req.user!.user_id;
+    const rows = await prisma.category_item.findMany({
+        where: { user_id: userId },
+        include: {
+            category: {
+                select: { category_id: true, category_name: true, parent_category_id: true },
+            },
+        },
+    });
+
+    // Build paths recursively or with a helper
+    const paths: Record<string, string[]> = {};
+    // ...reconstruct "Parent > Child" strings here
+
+    const pairs = Object.entries(paths).map(([sku, pathArr]) => ({
+        sku,
+        paths: pathArr,
+    }));
+    res.json({ pairs });
+});
+
 
 
 

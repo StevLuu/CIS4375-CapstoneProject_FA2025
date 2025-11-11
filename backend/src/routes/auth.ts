@@ -190,4 +190,23 @@ router.get("/health/authed", requireAuth, (req, res) => {
     res.json({ ok: true, user_id: req.user!.user_id, time: new Date().toISOString() });
 });
 
+// backend/src/routes/auth.ts
+router.patch("/me", requireAuth, async (req, res, next) => {
+    try {
+      const userId = req.user!.user_id;
+      const { squareUsername } = req.body ?? {};
+      if (squareUsername !== undefined) {
+        const cleaned = String(squareUsername).trim();
+        await prisma.user.update({
+          where: { user_id: userId },
+          data: { squareUsername: cleaned },
+          select: { user_id: true, squareUsername: true },
+        });
+        return res.json({ ok: true, squareUsername: cleaned });
+      }
+      return res.status(400).json({ error: "squareUsername is required" });
+    } catch (err) { next(err); }
+  });
+  
+
 export default router;

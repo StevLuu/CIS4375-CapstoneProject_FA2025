@@ -297,6 +297,49 @@ router.post("/batch", async (req, res, next) => {
     }
 });
 
+// POST /items/batch-create
+// Body: { items: Array<{ sku: string; item_name: string; description?: string|null; current_quantity?: number; price?: number|null; online_sale_price?: number|null }>, note?: string }
+router.post("/batch-create", async (req, res, next) => {
+    try {
+      const userId = req.user!.user_id;
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const note = req.body?.note ? String(req.body.note) : null;
+      if (!items.length) return res.status(400).json({ error: "items is required" });
+      if (items.length > 200) return res.status(400).json({ error: "batch limit is 200" });
+  
+      const data = items.map((x: any) => ({
+        sku: String(x.sku),
+        user_id: userId,
+        item_name: String(x.item_name),
+        description: x.description ?? null,
+        current_quantity: Number.isFinite(Number(x.current_quantity)) ? Number(x.current_quantity) : 0,
+        price: x.price != null ? Number(x.price) : null,
+        online_sale_price: x.online_sale_price != null ? Number(x.online_sale_price) : null,
+      }));
+  
+      const result = await prisma.$transaction(async (tx) => {
+        await tx.item.createMany({ data, skipDuplicates: true });
+        const lines = data.map((d: { sku: any; current_quantity: any; }) => ({ sku: d.sku, quantity: d.current_quantity ?? 0 }));
+        const log = await tx.log.create({
+          data: { user_id: userId, type: "bulk_create", note },
+          select: { log_id: true },
+        });
+        if (lines.length) {
+          await tx.log_item.createMany({
+            data: lines.map((l: { sku: any; quantity: any; }) => ({ log_id: log.log_id, sku: l.sku, user_id: userId, quantity: l.quantity })),
+          });
+        }
+        return { created: data.length, log_id: log.log_id };
+      });
+  
+      res.status(201).json(result);
+    } catch (err: any) {
+      if (err?.code === "P2002") return res.status(409).json({ error: "Duplicate SKU" });
+      next(err);
+    }
+  });
+  
+
 /** ---------- Existing endpoints with Decimal normalization ---------- **/
 
 // GET /items
