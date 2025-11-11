@@ -6,6 +6,38 @@ import { Prisma } from "@prisma/client";
 
 const router = express.Router();
 
+// READ a single log by id, optional items
+router.get("/:log_id", requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.user!.user_id;
+    const logId = Number(req.params.log_id);
+    if (!Number.isInteger(logId)) {
+      return res.status(400).json({ error: "Invalid log_id" });
+    }
+
+    const withItems = String(req.query.with_items ?? "") === "1";
+    const where = { user_id: userId, log_id: logId } as const;
+
+    let args: Prisma.logFindFirstArgs;
+    if (withItems) {
+      args = { where, include: { log_item: true } };
+    } else {
+      args = {
+        where,
+        select: { log_id: true, timestamp: true, type: true, note: true },
+      };
+    }
+
+    const row = await prisma.log.findFirst(args);
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+
+
 /** CREATE new log manually (with optional note) */
 router.post("/", requireAuth, async (req, res, next) => {
   try {
@@ -97,27 +129,37 @@ router.get("/items/:sku", requireAuth, async (req, res, next) => {
   }
 });
 
-/** UPDATE log (type or note) */
+/** UPDATE log (type, note, timestamp) */
 router.patch("/:log_id", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user!.user_id;
     const logId = Number(req.params.log_id);
-    const { type, note } = req.body ?? {};
+    const { type, note, timestamp } = req.body ?? {};
 
-    const updated = await prisma.log.updateMany({
-      where: { log_id: logId, user_id: userId },
-      data: {
-        ...(type !== undefined ? { type: String(type) } : {}),
-        ...(note !== undefined ? { note: String(note) } : {}),
-      },
-    });
+    const data: Prisma.logUpdateManyArgs["data"] = {};
+    if (type !== undefined) data.type = String(type);
+    if (note !== undefined) data.note = String(note);
+    if (timestamp !== undefined) {
+      const d = new Date(String(timestamp));
+      if (isNaN(d.getTime())) {
+        return res.status(400).json({ error: "Invalid timestamp. Use ISO 8601 or a valid date-time string." });
+      }
+      data.timestamp = d; // Prisma Date -> TIMESTAMP column
+    }
 
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: "No updatable fields provided" });
+    }
+
+    const updated = await prisma.log.updateMany({ where: { log_id: logId, user_id: userId }, data });
     if (!updated.count) return res.status(404).json({ error: "Log not found" });
+
     res.json({ message: "Log updated" });
   } catch (err) {
     next(err);
   }
 });
+
 
 /** UPDATE log_item quantity (adjust mis-logged amount) */
 router.patch("/:log_id/items/:sku", requireAuth, async (req, res, next) => {
