@@ -1,3 +1,4 @@
+// backend/src/routes/categories.ts
 import { Router } from "express";
 import { prisma } from "../services/prisma";
 import { requireAuth } from "../middleware/requireAuth";

@@ -1,9 +1,10 @@
+// backend/src/routes/logs.ts
 import express from "express";
 import { requireAuth } from "../middleware/requireAuth";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../services/prisma";
+import { Prisma } from "@prisma/client";
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 /** CREATE new log manually (with optional note) */
 router.post("/", requireAuth, async (req, res, next) => {
@@ -39,43 +40,58 @@ router.post("/", requireAuth, async (req, res, next) => {
   }
 });
 
+
 /** READ all logs */
 router.get("/", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user!.user_id;
-    const { type, limit = 50, cursor } = req.query;
+    const { type, limit = 50, cursor, with_items } = req.query;
     const take = Math.min(Number(limit) || 50, 200);
+    const includeItems = String(with_items ?? "") === "1";
 
-    const logs = await prisma.log.findMany({
+    const base: Prisma.logFindManyArgs = {
       where: { user_id: userId, ...(type ? { type: String(type) } : {}) },
       orderBy: { timestamp: "desc" },
       take,
       ...(cursor ? { skip: 1, cursor: { log_id: Number(cursor) } } : {}),
-      include: { log_item: true },
-    });
+    };
 
-    res.json({ logs });
+    if (includeItems) {
+      base.include = { log_item: true };
+    } else {
+      base.select = { log_id: true, timestamp: true, type: true, note: true };
+    }
+
+    const logs = await prisma.log.findMany(base);
+    const nextCursor = logs.length === take ? logs[logs.length - 1].log_id : null;
+
+    res.json({ logs, nextCursor });
   } catch (err) {
     next(err);
   }
 });
+
 
 /** READ logs for a specific item */
 router.get("/items/:sku", requireAuth, async (req, res, next) => {
   try {
     const userId = req.user!.user_id;
     const sku = String(req.params.sku);
-    const { limit = 50 } = req.query;
+    const { limit = 50, cursor } = req.query;
     const take = Math.min(Number(limit) || 50, 200);
 
     const logs = await prisma.log.findMany({
       where: { user_id: userId, log_item: { some: { sku } } },
       orderBy: { timestamp: "desc" },
       take,
+      ...(cursor ? { skip: 1, cursor: { log_id: Number(cursor) } } : {}),
       include: { log_item: { where: { sku } } },
     });
 
-    res.json({ logs });
+    const nextCursor =
+      logs.length === take ? logs[logs.length - 1].log_id : null;
+
+    res.json({ logs, nextCursor });
   } catch (err) {
     next(err);
   }
