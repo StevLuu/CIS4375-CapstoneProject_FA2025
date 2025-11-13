@@ -52,7 +52,7 @@ function normalizeItem(it: ItemDTO) {
 /* ===== Page ===== */
 export default function Inventory() {
   const { loggedIn, user, refresh } = useAuth();
-  const [showLogin, setShowLogin] = useState(false);
+  // const [showLogin, setShowLogin] = useState(false);
 
   // tree
   const [roots, setRoots] = useState<CategoryNode[]>([]);
@@ -82,10 +82,11 @@ export default function Inventory() {
   // breadcrumbs cache
   const breadcrumbsRef = useRef<Record<string, BreadcrumbPaths>>({});
 
-  // auth
-  useEffect(() => { if (!loggedIn || !user?.email) setShowLogin(true); }, [loggedIn, user]);
+  // auth + initial load
+  // useEffect(() => {
+  //   if (!loggedIn || !user?.email) setShowLogin(true);
+  // }, [loggedIn, user]);
 
-  // load roots and uncategorized
   useEffect(() => {
     if (!loggedIn) return;
     void loadRoots();
@@ -116,7 +117,11 @@ export default function Inventory() {
   }
 
   function toggleExpand(id: number) {
-    setExpanded(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setExpanded(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
     void loadChildren(id);
   }
 
@@ -153,7 +158,10 @@ export default function Inventory() {
     if (opts?.cursor) params.set("cursor", opts.cursor);
     const data = await api<ItemsResp>(`/categories/uncategorized?${params.toString()}`);
     const rows = (data.items ?? []).map(normalizeItem);
-    setUncat(prev => ({ rows: opts?.reset ? rows : [...prev.rows, ...rows], nextCursor: data.nextCursor ?? null }));
+    setUncat(prev => ({
+      rows: opts?.reset ? rows : [...prev.rows, ...rows],
+      nextCursor: data.nextCursor ?? null,
+    }));
   }
 
   // re-query opened nodes and uncategorized on submitted filter changes
@@ -161,18 +169,28 @@ export default function Inventory() {
     Array.from(expanded).forEach(id => void loadItemsForCategory(id, { reset: true, cursor: null }));
     if (showUncat) void loadUncategorized({ reset: true, cursor: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [archivedFilter, sort, search]);
+  }, [archivedFilter, search]);
 
   // selection
-  function toggleSelect(sku: string) { setSelectedSkus(s => { const n = new Set(s); n.has(sku) ? n.delete(sku) : n.add(sku); return n; }); }
+  function toggleSelect(sku: string) {
+    setSelectedSkus(s => {
+      const n = new Set(s);
+      n.has(sku) ? n.delete(sku) : n.add(sku);
+      return n;
+    });
+  }
 
   // breadcrumbs
   async function ensureBreadcrumbFor(sku: string) {
     if (breadcrumbsRef.current[sku]) return;
     try {
-      const resp = await api<Record<string, BreadcrumbPaths>>(`/items/categories?skus=${encodeURIComponent(sku)}`);
+      const resp = await api<Record<string, BreadcrumbPaths>>(
+        `/items/categories?skus=${encodeURIComponent(sku)}`
+      );
       breadcrumbsRef.current = { ...breadcrumbsRef.current, ...resp };
-    } catch { }
+    } catch {
+      // ignore
+    }
   }
 
   // archive toggle via dedicated endpoint
@@ -183,27 +201,40 @@ export default function Inventory() {
         const cid = Number(key);
         const entry = mm[cid];
         if (!entry) continue;
-        mm[cid] = { ...entry, rows: entry.rows.map(it => it.sku === sku ? { ...it, archived: to } : it) };
+        mm[cid] = {
+          ...entry,
+          rows: entry.rows.map(it => (it.sku === sku ? { ...it, archived: to } : it)),
+        };
       }
       return mm;
     });
-    setUncat(u => ({ ...u, rows: u.rows.map(it => it.sku === sku ? { ...it, archived: to } : it) }));
+    setUncat(u => ({
+      ...u,
+      rows: u.rows.map(it => (it.sku === sku ? { ...it, archived: to } : it)),
+    }));
     try {
       await api(`/items/${encodeURIComponent(sku)}/archive`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ archived: to }),
       });
-    } catch { }
+    } catch {
+      // ignore
+    }
   }
 
   return (
     <div className="space-y-6">
-      <LoginModal
+      {/* <LoginModal
         open={showLogin}
         onClose={() => setShowLogin(false)}
-        onSuccess={async () => { setShowLogin(false); await refresh(); await loadRoots(); await loadUncategorized({ reset: true }); }}
-      />
+        onSuccess={async () => {
+          setShowLogin(false);
+          await refresh();
+          await loadRoots();
+          await loadUncategorized({ reset: true });
+        }}
+      /> */}
 
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -214,37 +245,78 @@ export default function Inventory() {
         <div className="flex flex-wrap items-center gap-2">
           <form
             className="flex items-center gap-2"
-            onSubmit={(e) => { e.preventDefault(); setSearch(searchInput.trim()); }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              setSearch(searchInput.trim());
+            }}
           >
-            <input className="input w-56" placeholder="Search name or SKU"
-              value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
-            <button className="btn" type="submit">Search</button>
+            <input
+              className="input w-56"
+              placeholder="Search name or SKU"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+            <button className="btn" type="submit">
+              Search
+            </button>
             {(search || searchInput) && (
-              <button className="btn" type="button" onClick={() => { setSearchInput(""); setSearch(""); }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                }}
+              >
                 Clear
               </button>
             )}
           </form>
-          <select className="input w-40" value={archivedFilter} onChange={e => setArchivedFilter(e.target.value as ArchivedFilter)}>
+          <select
+            className="input w-40"
+            value={archivedFilter}
+            onChange={e => setArchivedFilter(e.target.value as ArchivedFilter)}
+          >
             <option value="exclude">Hide archived</option>
             <option value="include">Include archived</option>
             <option value="only">Only archived</option>
           </select>
-          <select className="input w-28" value={sort} onChange={e => setSort(e.target.value as SortDir)}>
+          <select
+            className="input w-28"
+            value={sort}
+            onChange={e => setSort(e.target.value as SortDir)}
+          >
             <option value="asc">A to Z</option>
             <option value="desc">Z to A</option>
           </select>
-          {selectedSkus.size > 0 && <button className="btn" onClick={() => setMassOpen(true)}>Submit {selectedSkus.size} selected</button>}
-          <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => setAddOpen(true)}>+ Item</button>
+          {selectedSkus.size > 0 && (
+            <button className="btn" onClick={() => setMassOpen(true)}>
+              Submit {selectedSkus.size} selected
+            </button>
+          )}
+          <button
+            className="btn bg-indigo-600 text-white hover:bg-indigo-700"
+            onClick={() => setAddOpen(true)}
+          >
+            + Item
+          </button>
         </div>
       </div>
 
       {/* Uncategorized */}
       <div className="rounded-2xl border bg-white p-4">
         <div className="flex items-center gap-2">
-          <button className="btn px-2" onClick={() => setShowUncat(!showUncat)} aria-label="Toggle">{showUncat ? "▾" : "▸"}</button>
+          <button
+            className="btn px-2"
+            onClick={() => setShowUncat(!showUncat)}
+            aria-label="Toggle"
+          >
+            {showUncat ? "▾" : "▸"}
+          </button>
           <span className="font-medium">Uncategorized</span>
-          <span className="rounded-full border px-2 py-0.5 text-xs text-neutral-600">{uncat.rows.length}</span>
+          <span className="rounded-full border px-2 py-0.5 text-xs text-neutral-600">
+            {uncat.rows.length}
+          </span>
         </div>
         {showUncat && (
           <div className="ml-6 mt-2">
@@ -252,55 +324,93 @@ export default function Inventory() {
               <p className="text-xs text-neutral-500">No items.</p>
             ) : (
               <ul className="space-y-1">
-                {uncat.rows.slice().sort((a, b) => {
-                  const A = (a.item_name || a.sku).toLowerCase(); const B = (b.item_name || b.sku).toLowerCase();
-                  return sort === "asc" ? A.localeCompare(B) : B.localeCompare(A);
-                }).map(it => {
-                  const archived = (it.archived ?? "N") === "Y";
-                  const crumbs = breadcrumbsRef.current[it.sku];
-                  return (
-                    <li
-                      key={it.sku}
-                      className={`flex items-center justify-between rounded-lg border px-3 py-2 ${archived ? "opacity-60 grayscale" : ""}`}
-                      onMouseEnter={() => ensureBreadcrumbFor(it.sku)}
-                      title={crumbs ? crumbs.map(p => p.map(q => q.category_name).join(" > ")).join("\n") : ""}
-                      onClick={() => setSingleEdit({ open: true, sku: it.sku })}
-                    >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          onClick={(e) => e.stopPropagation()}
-                          checked={selectedSkus.has(it.sku)}
-                          onChange={() => toggleSelect(it.sku)}
-                        />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{it.item_name || it.sku}</span>
-                            <span className="rounded-full border px-2 py-0.5 text-[10px] text-neutral-600">{it.sku}</span>
-                          </div>
-                          <div className="text-xs text-neutral-600">
-                            Stock {Number(it.current_quantity ?? 0)}{"  "}
-                            Price {it.price == null ? "N/A" : fmtMoney.format(it.price as number)}
+                {uncat.rows
+                  .slice()
+                  .sort((a, b) => {
+                    const A = (a.item_name || a.sku).toLowerCase();
+                    const B = (b.item_name || b.sku).toLowerCase();
+                    return sort === "asc" ? A.localeCompare(B) : B.localeCompare(A);
+                  })
+                  .map(it => {
+                    const archived = (it.archived ?? "N") === "Y";
+                    const crumbs = breadcrumbsRef.current[it.sku];
+                    return (
+                      <li
+                        key={it.sku}
+                        className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                          archived ? "opacity-60 grayscale" : ""
+                        }`}
+                        onMouseEnter={() => ensureBreadcrumbFor(it.sku)}
+                        title={
+                          crumbs
+                            ? crumbs
+                                .map(p => p.map(q => q.category_name).join(" > "))
+                                .join("\n")
+                            : ""
+                        }
+                        onClick={() => setSingleEdit({ open: true, sku: it.sku })}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            onClick={(e) => e.stopPropagation()}
+                            checked={selectedSkus.has(it.sku)}
+                            onChange={() => toggleSelect(it.sku)}
+                          />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">
+                                {it.item_name || it.sku}
+                              </span>
+                              <span className="rounded-full border px-2 py-0.5 text-[10px] text-neutral-600">
+                                {it.sku}
+                              </span>
+                            </div>
+                            <div className="text-xs text-neutral-600">
+                              Stock {Number(it.current_quantity ?? 0)}{"  "}
+                              Price{" "}
+                              {it.price == null
+                                ? "N/A"
+                                : fmtMoney.format(it.price as number)}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {archived ? (
-                          <button className="text-xs text-indigo-600 hover:underline" onClick={(e) => { e.stopPropagation(); archiveOne(it.sku, "N"); }}>
-                            - archive
-                          </button>
-                        ) : (
-                          <button className="text-xs text-indigo-600 hover:underline" onClick={(e) => { e.stopPropagation(); archiveOne(it.sku, "Y"); }}>
-                            + archive
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
+                        <div className="flex items-center gap-3">
+                          {archived ? (
+                            <button
+                              className="text-xs text-indigo-600 hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                archiveOne(it.sku, "N");
+                              }}
+                            >
+                              - archive
+                            </button>
+                          ) : (
+                            <button
+                              className="text-xs text-indigo-600 hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                archiveOne(it.sku, "Y");
+                              }}
+                            >
+                              + archive
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
               </ul>
             )}
-            {uncat.nextCursor && <button className="btn text-sm mt-2" onClick={() => loadUncategorized({ cursor: uncat.nextCursor })}>Load more</button>}
+            {uncat.nextCursor && (
+              <button
+                className="btn text-sm mt-2"
+                onClick={() => loadUncategorized({ cursor: uncat.nextCursor })}
+              >
+                Load more
+              </button>
+            )}
           </div>
         )}
 
@@ -315,11 +425,20 @@ export default function Inventory() {
                   node={n}
                   depth={0}
                   expanded={expanded}
-                  onToggle={() => { toggleExpand(n.category_id); void loadItemsForCategory(n.category_id, { reset: true }); }}
+                  onToggle={() => {
+                    toggleExpand(n.category_id);
+                    void loadItemsForCategory(n.category_id, { reset: true });
+                  }}
                   childrenMap={children}
-                  onOpenChild={(id) => { toggleExpand(id); void loadItemsForCategory(id, { reset: true }); }}
+                  onOpenChild={(id) => {
+                    toggleExpand(id);
+                    void loadItemsForCategory(id, { reset: true });
+                  }}
                   itemsByCat={itemsByCat}
-                  onLoadMore={(id) => { const next = itemsByCat[id]?.nextCursor; if (next) void loadItemsForCategory(id, { cursor: next }); }}
+                  onLoadMore={(id) => {
+                    const next = itemsByCat[id]?.nextCursor;
+                    if (next) void loadItemsForCategory(id, { cursor: next });
+                  }}
                   sort={sort}
                   selectedSkus={selectedSkus}
                   onToggleSelect={toggleSelect}
@@ -327,7 +446,9 @@ export default function Inventory() {
                   onHoverItem={ensureBreadcrumbFor}
                   breadcrumbs={breadcrumbsRef.current}
                   onArchiveToggle={(sku, to) => void archiveOne(sku, to)}
-                  onOpenSingleEdit={(sku) => setSingleEdit({ open: true, sku })}
+                  onOpenSingleEdit={(sku) =>
+                    setSingleEdit({ open: true, sku })
+                  }
                 />
               </li>
             ))}
@@ -343,7 +464,9 @@ export default function Inventory() {
           onDone={() => {
             setMassOpen(false);
             setSelectedSkus(new Set());
-            Array.from(expanded).forEach(id => void loadItemsForCategory(id, { reset: true }));
+            Array.from(expanded).forEach(id =>
+              void loadItemsForCategory(id, { reset: true })
+            );
             if (showUncat) void loadUncategorized({ reset: true });
           }}
         />
@@ -354,19 +477,35 @@ export default function Inventory() {
         <CategoryEditModal
           node={editCategory.node}
           onClose={() => setEditCategory({ open: false })}
-          onUpdated={async () => { setEditCategory({ open: false }); await loadRoots(); if (editCategory.node?.parent_category_id != null) await loadChildren(editCategory.node.parent_category_id); }}
+          onUpdated={async () => {
+            setEditCategory({ open: false });
+            await loadRoots();
+            if (editCategory.node?.parent_category_id != null) {
+              await loadChildren(editCategory.node.parent_category_id);
+            }
+          }}
         />
       )}
 
       {/* Add item */}
       {addOpen && (
-        <Modal open={true} onClose={() => setAddOpen(false)} title="Add item">
+        <Modal
+          open={true}
+          onClose={() => setAddOpen(false)}
+          title="Add item"
+        >
           <AddItemForm
             onCancel={() => setAddOpen(false)}
             onSave={async (payload) => {
-              await api(`/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+              await api(`/items`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
               setAddOpen(false);
-              Array.from(expanded).forEach(id => void loadItemsForCategory(id, { reset: true }));
+              Array.from(expanded).forEach(id =>
+                void loadItemsForCategory(id, { reset: true })
+              );
               if (showUncat) void loadUncategorized({ reset: true });
             }}
           />
@@ -375,13 +514,19 @@ export default function Inventory() {
 
       {/* Single item edit */}
       {singleEdit.open && singleEdit.sku && (
-        <Modal open={true} onClose={() => setSingleEdit({ open: false })} title={`Edit ${singleEdit.sku}`}>
+        <Modal
+          open={true}
+          onClose={() => setSingleEdit({ open: false })}
+          title={`Edit ${singleEdit.sku}`}
+        >
           <SingleEditForm
             sku={singleEdit.sku}
             onCancel={() => setSingleEdit({ open: false })}
             onSaved={async () => {
               setSingleEdit({ open: false });
-              Array.from(expanded).forEach(id => void loadItemsForCategory(id, { reset: true }));
+              Array.from(expanded).forEach(id =>
+                void loadItemsForCategory(id, { reset: true })
+              );
               if (showUncat) void loadUncategorized({ reset: true });
             }}
           />
@@ -393,26 +538,48 @@ export default function Inventory() {
 
 /* ===== Category branch ===== */
 function CategoryBranch(props: {
-  node: CategoryNode; depth: number; expanded: Set<number>; onToggle: () => void;
+  node: CategoryNode;
+  depth: number;
+  expanded: Set<number>;
+  onToggle: () => void;
   childrenMap: Record<number, CategoryNode[] | undefined>;
   onOpenChild: (id: number) => void;
   itemsByCat: Record<number, { rows: ItemDTO[]; nextCursor: string | null }>;
-  onLoadMore: (catId: number) => void; sort: SortDir;
-  selectedSkus: Set<string>; onToggleSelect: (sku: string) => void;
+  onLoadMore: (catId: number) => void;
+  sort: SortDir;
+  selectedSkus: Set<string>;
+  onToggleSelect: (sku: string) => void;
   onEditCategory: (node: CategoryNode) => void;
   onHoverItem: (sku: string) => void;
   breadcrumbs: Record<string, BreadcrumbPaths>;
   onArchiveToggle: (sku: string, to: "Y" | "N") => void;
   onOpenSingleEdit: (sku: string) => void;
 }) {
-  const { node, depth, expanded, onToggle, childrenMap, onOpenChild, itemsByCat, onLoadMore, sort,
-    selectedSkus, onToggleSelect, onEditCategory, onHoverItem, breadcrumbs, onArchiveToggle, onOpenSingleEdit } = props;
+  const {
+    node,
+    depth,
+    expanded,
+    onToggle,
+    childrenMap,
+    onOpenChild,
+    itemsByCat,
+    onLoadMore,
+    sort,
+    selectedSkus,
+    onToggleSelect,
+    onEditCategory,
+    onHoverItem,
+    breadcrumbs,
+    onArchiveToggle,
+    onOpenSingleEdit,
+  } = props;
   const open = expanded.has(node.category_id);
   const items = itemsByCat[node.category_id]?.rows ?? [];
   const sorted = useMemo(() => {
     const arr = [...items];
     arr.sort((a, b) => {
-      const A = (a.item_name || a.sku).toLowerCase(); const B = (b.item_name || b.sku).toLowerCase();
+      const A = (a.item_name || a.sku).toLowerCase();
+      const B = (b.item_name || b.sku).toLowerCase();
       return sort === "asc" ? A.localeCompare(B) : B.localeCompare(A);
     });
     return arr;
@@ -421,18 +588,36 @@ function CategoryBranch(props: {
   return (
     <div>
       <div className="flex items-center gap-2">
-        <button className="btn px-2" onClick={onToggle} aria-label="Toggle">{open ? "▾" : "▸"}</button>
+        <button className="btn px-2" onClick={onToggle} aria-label="Toggle">
+          {open ? "▾" : "▸"}
+        </button>
         <div className="flex items-center gap-2">
-          <span style={{ paddingLeft: depth * 12 }} className="font-medium">{node.category_name}</span>
-          {node.counts && <span className="rounded-full border px-2 py-0.5 text-xs text-neutral-600">{node.counts.direct}</span>}
-          <button className="text-xs text-indigo-600 hover:underline" onClick={() => onEditCategory(node)}>edit</button>
+          <span
+            style={{ paddingLeft: depth * 12 }}
+            className="font-medium"
+          >
+            {node.category_name}
+          </span>
+          {node.counts && (
+            <span className="rounded-full border px-2 py-0.5 text-xs text-neutral-600">
+              {node.counts.direct}
+            </span>
+          )}
+          <button
+            className="text-xs text-indigo-600 hover:underline"
+            onClick={() => onEditCategory(node)}
+          >
+            edit
+          </button>
         </div>
       </div>
 
       {open && (
         <div className="ml-6 mt-2 space-y-2">
           {sorted.length === 0 ? (
-            <p className="text-xs text-neutral-500">No items in this category.</p>
+            <p className="text-xs text-neutral-500">
+              No items in this category.
+            </p>
           ) : (
             <ul className="space-y-1">
               {sorted.map(it => {
@@ -441,9 +626,17 @@ function CategoryBranch(props: {
                 return (
                   <li
                     key={it.sku}
-                    className={`flex items-center justify-between rounded-lg border px-3 py-2 ${archived ? "opacity-60 grayscale" : ""}`}
+                    className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                      archived ? "opacity-60 grayscale" : ""
+                    }`}
                     onMouseEnter={() => onHoverItem(it.sku)}
-                    title={crumbs ? crumbs.map(p => p.map(q => q.category_name).join(" > ")).join("\n") : ""}
+                    title={
+                      crumbs
+                        ? crumbs
+                            .map(p => p.map(q => q.category_name).join(" > "))
+                            .join("\n")
+                        : ""
+                    }
                     onClick={() => onOpenSingleEdit(it.sku)}
                   >
                     <div className="flex items-center gap-2">
@@ -455,22 +648,41 @@ function CategoryBranch(props: {
                       />
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-medium">{it.item_name || it.sku}</span>
-                          <span className="rounded-full border px-2 py-0.5 text-[10px] text-neutral-600">{it.sku}</span>
+                          <span className="font-medium">
+                            {it.item_name || it.sku}
+                          </span>
+                          <span className="rounded-full border px-2 py-0.5 text-[10px] text-neutral-600">
+                            {it.sku}
+                          </span>
                         </div>
                         <div className="text-xs text-neutral-600">
                           Stock {Number(it.current_quantity ?? 0)}{"  "}
-                          Price {it.price == null ? "N/A" : fmtMoney.format(it.price as number)}
+                          Price{" "}
+                          {it.price == null
+                            ? "N/A"
+                            : fmtMoney.format(it.price as number)}
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       {archived ? (
-                        <button className="text-xs text-indigo-600 hover:underline" onClick={(e) => { e.stopPropagation(); onArchiveToggle(it.sku, "N"); }}>
+                        <button
+                          className="text-xs text-indigo-600 hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onArchiveToggle(it.sku, "N");
+                          }}
+                        >
                           - archive
                         </button>
                       ) : (
-                        <button className="text-xs text-indigo-600 hover:underline" onClick={(e) => { e.stopPropagation(); onArchiveToggle(it.sku, "Y"); }}>
+                        <button
+                          className="text-xs text-indigo-600 hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onArchiveToggle(it.sku, "Y");
+                          }}
+                        >
                           + archive
                         </button>
                       )}
@@ -481,27 +693,41 @@ function CategoryBranch(props: {
             </ul>
           )}
           {itemsByCat[node.category_id]?.nextCursor && (
-            <button className="btn text-sm" onClick={() => onLoadMore(node.category_id)}>Load more</button>
+            <button
+              className="btn text-sm"
+              onClick={() => onLoadMore(node.category_id)}
+            >
+              Load more
+            </button>
           )}
 
-          {childrenMap[node.category_id] && childrenMap[node.category_id]!.length > 0 && (
-            <ul className="mt-2 space-y-2">
-              {childrenMap[node.category_id]!.map(ch => (
-                <li key={`${node.category_id}-${ch.category_id}`}>
-                  <CategoryBranch
-                    node={ch} depth={depth + 1} expanded={expanded}
-                    onToggle={() => onOpenChild(ch.category_id)}
-                    childrenMap={childrenMap} onOpenChild={onOpenChild}
-                    itemsByCat={itemsByCat} onLoadMore={onLoadMore}
-                    sort={sort} selectedSkus={selectedSkus} onToggleSelect={onToggleSelect}
-                    onEditCategory={onEditCategory} onHoverItem={onHoverItem}
-                    breadcrumbs={breadcrumbs} onArchiveToggle={onArchiveToggle}
-                    onOpenSingleEdit={onOpenSingleEdit}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
+          {childrenMap[node.category_id] &&
+            childrenMap[node.category_id]!.length > 0 && (
+              <ul className="mt-2 space-y-2">
+                {childrenMap[node.category_id]!.map(ch => (
+                  <li key={`${node.category_id}-${ch.category_id}`}>
+                    <CategoryBranch
+                      node={ch}
+                      depth={depth + 1}
+                      expanded={expanded}
+                      onToggle={() => onOpenChild(ch.category_id)}
+                      childrenMap={childrenMap}
+                      onOpenChild={onOpenChild}
+                      itemsByCat={itemsByCat}
+                      onLoadMore={onLoadMore}
+                      sort={sort}
+                      selectedSkus={selectedSkus}
+                      onToggleSelect={onToggleSelect}
+                      onEditCategory={onEditCategory}
+                      onHoverItem={onHoverItem}
+                      breadcrumbs={breadcrumbs}
+                      onArchiveToggle={onArchiveToggle}
+                      onOpenSingleEdit={onOpenSingleEdit}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
         </div>
       )}
     </div>
@@ -511,7 +737,6 @@ function CategoryBranch(props: {
 /* ===== Mass edit modal, tagging, forms remain unchanged below ===== */
 /* ... keep your existing MassEditModal, MassTag, PickerTree, PickerRow, MassFieldEdit, CategoryEditModal, AddItemForm, SingleEditForm components ... */
 
-
 /* ===== Mass edit modal ===== */
 function MassEditModal(props: { selected: string[]; onClose: () => void; onDone: () => void }) {
   const { selected, onClose, onDone } = props;
@@ -520,11 +745,31 @@ function MassEditModal(props: { selected: string[]; onClose: () => void; onDone:
     <Modal open={true} onClose={onClose} title="Mass actions">
       <div className="space-y-4">
         <div className="flex gap-2">
-          <button className={`btn ${tab === "tag" ? "bg-neutral-900 text-white" : ""}`} onClick={() => setTab("tag")}>Tag</button>
-          <button className={`btn ${tab === "edit" ? "bg-neutral-900 text-white" : ""}`} onClick={() => setTab("edit")}>Edit</button>
-          <div className="ml-auto text-sm text-neutral-600">{selected.length} selected</div>
+          <button
+            className={`btn ${
+              tab === "tag" ? "bg-neutral-900 text-white" : ""
+            }`}
+            onClick={() => setTab("tag")}
+          >
+            Tag
+          </button>
+          <button
+            className={`btn ${
+              tab === "edit" ? "bg-neutral-900 text-white" : ""
+            }`}
+            onClick={() => setTab("edit")}
+          >
+            Edit
+          </button>
+          <div className="ml-auto text-sm text-neutral-600">
+            {selected.length} selected
+          </div>
         </div>
-        {tab === "tag" ? <MassTag selected={selected} onDone={onDone} /> : <MassFieldEdit selected={selected} onDone={onDone} />}
+        {tab === "tag" ? (
+          <MassTag selected={selected} onDone={onDone} />
+        ) : (
+          <MassFieldEdit selected={selected} onDone={onDone} />
+        )}
       </div>
     </Modal>
   );
@@ -544,7 +789,9 @@ function MassTag(props: { selected: string[]; onDone: () => void }) {
     (async () => {
       const d = await api<CategoriesResp>(`/categories`);
       const nodes: CategoryNode[] = (d.categories ?? []).map(c => ({
-        category_id: c.category_id, category_name: c.category_name, parent_category_id: c.parent_category_id ?? null
+        category_id: c.category_id,
+        category_name: c.category_name,
+        parent_category_id: c.parent_category_id ?? null,
       }));
       setTree(nodes);
     })();
@@ -555,7 +802,9 @@ function MassTag(props: { selected: string[]; onDone: () => void }) {
     if (!children[id]) {
       const d = await api<CategoriesResp>(`/categories?parent_id=${id}`);
       const nodes: CategoryNode[] = (d.categories ?? []).map(c => ({
-        category_id: c.category_id, category_name: c.category_name, parent_category_id: c.parent_category_id ?? null
+        category_id: c.category_id,
+        category_name: c.category_name,
+        parent_category_id: c.parent_category_id ?? null,
       }));
       setChildren(m => ({ ...m, [id]: nodes }));
     }
@@ -564,18 +813,33 @@ function MassTag(props: { selected: string[]; onDone: () => void }) {
     if (!active || !newName.trim()) return;
     setCreating(true);
     try {
-      await api(`/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category_name: newName.trim(), parent_category_id: active }) });
+      await api(`/categories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category_name: newName.trim(),
+          parent_category_id: active,
+        }),
+      });
       const d = await api<CategoriesResp>(`/categories?parent_id=${active}`);
       const nodes: CategoryNode[] = (d.categories ?? []).map(c => ({
-        category_id: c.category_id, category_name: c.category_name, parent_category_id: c.parent_category_id ?? null
+        category_id: c.category_id,
+        category_name: c.category_name,
+        parent_category_id: c.parent_category_id ?? null,
       }));
       setChildren(m => ({ ...m, [active]: nodes }));
       setNewName("");
-    } finally { setCreating(false); }
+    } finally {
+      setCreating(false);
+    }
   }
   async function attachOrDetach(action: "attach" | "detach") {
     if (!active) return;
-    await api(`/categories/${active}/items/batch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, skus: selected }) });
+    await api(`/categories/${active}/items/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, skus: selected }),
+    });
     onDone();
   }
 
@@ -585,47 +849,120 @@ function MassTag(props: { selected: string[]; onDone: () => void }) {
         <ul className="space-y-2">
           {tree.map(n => (
             <li key={n.category_id}>
-              <PickerRow node={n} depth={0} expanded={expanded.has(n.category_id)} onToggle={() => openNode(n.category_id)} onSelect={() => setActive(n.category_id)} activeId={active} />
+              <PickerRow
+                node={n}
+                depth={0}
+                expanded={expanded.has(n.category_id)}
+                onToggle={() => openNode(n.category_id)}
+                onSelect={() => setActive(n.category_id)}
+                activeId={active}
+              />
               {expanded.has(n.category_id) && children[n.category_id] && (
-                <PickerTree nodes={children[n.category_id]!} depth={1} expanded={expanded} childrenMap={children} onOpen={openNode} onSelect={(id) => setActive(id)} activeId={active} />
+                <PickerTree
+                  nodes={children[n.category_id]!}
+                  depth={1}
+                  expanded={expanded}
+                  childrenMap={children}
+                  onOpen={openNode}
+                  onSelect={(id) => setActive(id)}
+                  activeId={active}
+                />
               )}
             </li>
           ))}
         </ul>
       </div>
       <div className="flex items-center gap-2">
-        <input className="input" placeholder="New child name" value={newName} onChange={(e) => setNewName(e.target.value)} />
-        <button className="btn" onClick={createChild} disabled={creating || !active || !newName.trim()}>New</button>
+        <input
+          className="input"
+          placeholder="New child name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+        />
+        <button
+          className="btn"
+          onClick={createChild}
+          disabled={creating || !active || !newName.trim()}
+        >
+          New
+        </button>
         <div className="ml-auto flex gap-2">
-          <button className="btn" onClick={() => attachOrDetach("detach")} disabled={!active}>Remove from category</button>
-          <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => attachOrDetach("attach")} disabled={!active}>Add to category</button>
+          <button
+            className="btn"
+            onClick={() => attachOrDetach("detach")}
+            disabled={!active}
+          >
+            Remove from category
+          </button>
+          <button
+            className="btn bg-indigo-600 text-white hover:bg-indigo-700"
+            onClick={() => attachOrDetach("attach")}
+            disabled={!active}
+          >
+            Add to category
+          </button>
         </div>
       </div>
     </div>
   );
 }
-function PickerTree(props: { nodes: CategoryNode[]; depth: number; expanded: Set<number>; childrenMap: Record<number, CategoryNode[] | undefined>; onOpen: (id: number) => void; onSelect: (id: number) => void; activeId: number | null; }) {
+function PickerTree(props: {
+  nodes: CategoryNode[];
+  depth: number;
+  expanded: Set<number>;
+  childrenMap: Record<number, CategoryNode[] | undefined>;
+  onOpen: (id: number) => void;
+  onSelect: (id: number) => void;
+  activeId: number | null;
+}) {
   const { nodes, depth, expanded, childrenMap, onOpen, onSelect, activeId } = props;
   return (
     <ul className="space-y-2">
       {nodes.map(n => (
         <li key={`${depth}-${n.category_id}`}>
-          <PickerRow node={n} depth={depth} expanded={expanded.has(n.category_id)} onToggle={() => onOpen(n.category_id)} onSelect={() => onSelect(n.category_id)} activeId={activeId} />
+          <PickerRow
+            node={n}
+            depth={depth}
+            expanded={expanded.has(n.category_id)}
+            onToggle={() => onOpen(n.category_id)}
+            onSelect={() => onSelect(n.category_id)}
+            activeId={activeId}
+          />
           {expanded.has(n.category_id) && childrenMap[n.category_id] && (
-            <PickerTree nodes={childrenMap[n.category_id]!} depth={depth + 1} expanded={expanded} childrenMap={childrenMap} onOpen={onOpen} onSelect={onSelect} activeId={activeId} />
+            <PickerTree
+              nodes={childrenMap[n.category_id]!}
+              depth={depth + 1}
+              expanded={expanded}
+              childrenMap={childrenMap}
+              onOpen={onOpen}
+              onSelect={onSelect}
+              activeId={activeId}
+            />
           )}
         </li>
       ))}
     </ul>
   );
 }
-function PickerRow(props: { node: CategoryNode; depth: number; expanded: boolean; onToggle: () => void; onSelect: () => void; activeId: number | null; }) {
+function PickerRow(props: {
+  node: CategoryNode;
+  depth: number;
+  expanded: boolean;
+  onToggle: () => void;
+  onSelect: () => void;
+  activeId: number | null;
+}) {
   const { node, depth, expanded, onToggle, onSelect, activeId } = props;
   const active = activeId === node.category_id;
   return (
     <div className="flex items-center gap-2">
-      <button className="btn px-2" onClick={onToggle} aria-label="Toggle">{expanded ? "▾" : "▸"}</button>
-      <button className={`btn border ${active ? "bg-neutral-900 text-white" : ""}`} onClick={onSelect}>
+      <button className="btn px-2" onClick={onToggle} aria-label="Toggle">
+        {expanded ? "▾" : "▸"}
+      </button>
+      <button
+        className={`btn border ${active ? "bg-neutral-900 text-white" : ""}`}
+        onClick={onSelect}
+      >
         <span style={{ paddingLeft: depth * 12 }}>{node.category_name}</span>
       </button>
     </div>
@@ -635,17 +972,36 @@ function PickerRow(props: { node: CategoryNode; depth: number; expanded: boolean
 /* ===== Mass field edit ===== */
 function MassFieldEdit(props: { selected: string[]; onDone: () => void }) {
   const { selected, onDone } = props;
-  const [name, setName] = useState(""); const [price, setPrice] = useState(""); const [qty, setQty] = useState("");
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [qty, setQty] = useState("");
   const [openMore, setOpenMore] = useState(false);
 
   const [form, setForm] = useState<Record<string, string>>({
-    description: "", variation_name: "", online_sale_price: "",
-    seo_title: "", seo_description: "", permalink: "", gtin: "",
-    square_online_item_visibility: "", item_type: "",
-    social_media_link_title: "", social_media_link_description: "",
-    shipping_enabled: "", self_serve_ordering: "", delivery_enabled: "", pickup_enabled: "",
-    sellable: "", contains_alcohol: "", stockable: "", skip_detail_screen_in_pos: "",
-    option_name_1: "", option_value_1: "", stock_alert_enabled: "", stock_alert_count: "", modifier: "",
+    description: "",
+    variation_name: "",
+    online_sale_price: "",
+    seo_title: "",
+    seo_description: "",
+    permalink: "",
+    gtin: "",
+    square_online_item_visibility: "",
+    item_type: "",
+    social_media_link_title: "",
+    social_media_link_description: "",
+    shipping_enabled: "",
+    self_serve_ordering: "",
+    delivery_enabled: "",
+    pickup_enabled: "",
+    sellable: "",
+    contains_alcohol: "",
+    stockable: "",
+    skip_detail_screen_in_pos: "",
+    option_name_1: "",
+    option_value_1: "",
+    stock_alert_enabled: "",
+    stock_alert_count: "",
+    modifier: "",
   });
 
   async function submit() {
@@ -654,65 +1010,113 @@ function MassFieldEdit(props: { selected: string[]; onDone: () => void }) {
     if (price.trim()) patch.price = Number(price);
     if (openMore) {
       for (const [k, v] of Object.entries(form)) {
-        if (v.trim() !== "") patch[k] = ["online_sale_price", "stock_alert_count"].includes(k) ? Number(v) : v;
+        if (v.trim() !== "") {
+          patch[k] = ["online_sale_price", "stock_alert_count"].includes(k)
+            ? Number(v)
+            : v;
+        }
       }
     }
-    const updates = props.selected.map(sku => ({
+    const updates = selected.map(sku => ({
       sku,
       patch,
       current_quantity: qty.trim() === "" ? undefined : Number(qty),
     }));
-    await api(`/items/batch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ updates }) });
+    await api(`/items/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ updates }),
+    });
     onDone();
   }
 
   return (
     <div className="space-y-4">
       <div className="grid gap-3">
-        <input className="input" placeholder="Name" value={name} onChange={e => setName(e.target.value)} />
-        <input className="input" type="number" step="0.01" placeholder="Price" value={price} onChange={e => setPrice(e.target.value)} />
-        <input className="input" type="number" placeholder="Set absolute quantity" value={qty} onChange={e => setQty(e.target.value)} />
+        <input
+          className="input"
+          placeholder="Name"
+          value={name}
+          onChange={e => setName(e.target.value)}
+        />
+        <input
+          className="input"
+          type="number"
+          step="0.01"
+          placeholder="Price"
+          value={price}
+          onChange={e => setPrice(e.target.value)}
+        />
+        <input
+          className="input"
+          type="number"
+          placeholder="Set absolute quantity"
+          value={qty}
+          onChange={e => setQty(e.target.value)}
+        />
       </div>
       <div className="rounded-xl border">
-        <button className="w-full px-3 py-2 text-left text-sm" onClick={() => setOpenMore(!openMore)}>More fields</button>
+        <button
+          className="w-full px-3 py-2 text-left text-sm"
+          onClick={() => setOpenMore(!openMore)}
+        >
+          More fields
+        </button>
         {openMore && (
           <div className="border-t p-3 grid gap-2">
             {Object.keys(form).map(k => (
-              <input key={k} className="input" placeholder={k} value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} />
+              <input
+                key={k}
+                className="input"
+                placeholder={k}
+                value={form[k]}
+                onChange={e =>
+                  setForm({
+                    ...form,
+                    [k]: e.target.value,
+                  })
+                }
+              />
             ))}
           </div>
         )}
       </div>
       <div className="flex justify-end gap-2">
-        <button className="btn" onClick={props.onDone}>Cancel</button>
-        <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" onClick={submit}>Apply edits</button>
+        <button className="btn" onClick={props.onDone}>
+          Cancel
+        </button>
+        <button
+          className="btn bg-indigo-600 text-white hover:bg-indigo-700"
+          onClick={submit}
+        >
+          Apply edits
+        </button>
       </div>
     </div>
   );
 }
 
-/* ===== Category edit modal — full CRUD ===== */
+/* ===== Category edit modal ===== */
 function CategoryEditModal(props: {
   node: CategoryNode;
   onClose: () => void;
-  onUpdated: () => void; // caller already reloads roots and siblings
+  onUpdated: () => void;
 }) {
   const { node, onClose, onUpdated } = props;
 
   const [name, setName] = useState(node.category_name);
-  const [parentId, setParentId] = useState<number | null>(node.parent_category_id ?? null);
+  const [parentId, setParentId] = useState<number | null>(
+    node.parent_category_id ?? null
+  );
 
-  // tree picker state for choosing a new parent
   const [roots, setRoots] = useState<CategoryNode[]>([]);
   const [children, setChildren] = useState<Record<number, CategoryNode[] | undefined>>({});
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // create child
   const [newChild, setNewChild] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // delete
   const [cascade, setCascade] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
@@ -720,9 +1124,8 @@ function CategoryEditModal(props: {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    // load roots for the parent picker
     (async () => {
-      const d = await api<{ categories: Array<{ category_id: number; category_name: string; parent_category_id: number | null }> }>(`/categories`);
+      const d = await api<CategoriesResp>(`/categories`);
       const nodes: CategoryNode[] = (d.categories ?? []).map(c => ({
         category_id: c.category_id,
         category_name: c.category_name,
@@ -735,7 +1138,7 @@ function CategoryEditModal(props: {
   async function openNode(id: number) {
     setExpanded(s => new Set(s).add(id));
     if (!children[id]) {
-      const d = await api<{ categories: Array<{ category_id: number; category_name: string; parent_category_id: number | null }> }>(`/categories?parent_id=${id}`);
+      const d = await api<CategoriesResp>(`/categories?parent_id=${id}`);
       const nodes: CategoryNode[] = (d.categories ?? []).map(c => ({
         category_id: c.category_id,
         category_name: c.category_name,
@@ -746,7 +1149,6 @@ function CategoryEditModal(props: {
   }
 
   function selectParent(newParentId: number | null) {
-    // prevent selecting itself
     if (newParentId === node.category_id) return;
     setParentId(newParentId);
     setPickerOpen(false);
@@ -795,11 +1197,19 @@ function CategoryEditModal(props: {
   }
 
   async function removeCategory() {
-    if (!confirm("Delete this category? Items remain linked only if their links are in other categories. all of its child categories (and possibly related entries in link tables) are automatically deleted too.")) return;
+    if (
+      !confirm(
+        "Delete this category? Items remain linked only if their links are in other categories. all of its child categories (and possibly related entries in link tables) are automatically deleted too."
+      )
+    )
+      return;
     setDeleting(true);
     setErr(null);
     try {
-      await api(`/categories/${node.category_id}?cascade=${cascade ? "1" : "0"}`, { method: "DELETE" });
+      await api(
+        `/categories/${node.category_id}?cascade=${cascade ? "1" : "0"}`,
+        { method: "DELETE" }
+      );
       onClose();
       await onUpdated();
     } catch (e: any) {
@@ -812,20 +1222,27 @@ function CategoryEditModal(props: {
   return (
     <Modal open={true} onClose={onClose} title="Edit category">
       <div className="space-y-5">
-        {/* Rename */}
         <div className="grid gap-2">
           <label className="text-sm font-medium">Name</label>
-          <input className="input" value={name} onChange={e => setName(e.target.value)} />
+          <input
+            className="input"
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
         </div>
 
-        {/* Parent picker */}
         <div className="grid gap-2">
           <label className="text-sm font-medium">Parent</label>
           <div className="flex items-center gap-2">
-            <button className="btn" onClick={() => setPickerOpen(p => !p)}>
+            <button
+              className="btn"
+              onClick={() => setPickerOpen(p => !p)}
+            >
               {pickerOpen ? "Close picker" : "Choose parent"}
             </button>
-            <button className="btn" onClick={() => selectParent(null)}>Set as root</button>
+            <button className="btn" onClick={() => selectParent(null)}>
+              Set as root
+            </button>
             <span className="text-sm text-neutral-600">
               {parentId == null ? "Root" : `Parent ID ${parentId}`}
             </span>
@@ -833,10 +1250,11 @@ function CategoryEditModal(props: {
           {pickerOpen && (
             <div className="rounded-xl border p-3 max-h-72 overflow-auto">
               <ul className="space-y-2">
-                {/* Root pseudo-row */}
                 <li>
                   <button
-                    className={`btn border ${parentId == null ? "bg-neutral-900 text-white" : ""}`}
+                    className={`btn border ${
+                      parentId == null ? "bg-neutral-900 text-white" : ""
+                    }`}
                     onClick={() => selectParent(null)}
                   >
                     Root
@@ -845,11 +1263,19 @@ function CategoryEditModal(props: {
                 {roots.map(r => (
                   <li key={`root-${r.category_id}`}>
                     <div className="flex items-center gap-2">
-                      <button className="btn px-2" onClick={() => openNode(r.category_id)} aria-label="Toggle">
+                      <button
+                        className="btn px-2"
+                        onClick={() => openNode(r.category_id)}
+                        aria-label="Toggle"
+                      >
                         {expanded.has(r.category_id) ? "▾" : "▸"}
                       </button>
                       <button
-                        className={`btn border ${parentId === r.category_id ? "bg-neutral-900 text-white" : ""}`}
+                        className={`btn border ${
+                          parentId === r.category_id
+                            ? "bg-neutral-900 text-white"
+                            : ""
+                        }`}
                         onClick={() => selectParent(r.category_id)}
                         disabled={r.category_id === node.category_id}
                       >
@@ -874,12 +1300,20 @@ function CategoryEditModal(props: {
           )}
         </div>
 
-        {/* Create child */}
         <div className="grid gap-2">
           <label className="text-sm font-medium">Create child</label>
           <div className="flex gap-2">
-            <input className="input flex-1" placeholder="Child name" value={newChild} onChange={e => setNewChild(e.target.value)} />
-            <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" onClick={createChild} disabled={creating || !newChild.trim()}>
+            <input
+              className="input flex-1"
+              placeholder="Child name"
+              value={newChild}
+              onChange={e => setNewChild(e.target.value)}
+            />
+            <button
+              className="btn bg-indigo-600 text-white hover:bg-indigo-700"
+              onClick={createChild}
+              disabled={creating || !newChild.trim()}
+            >
               {creating ? "Creating..." : "Create"}
             </button>
           </div>
@@ -887,18 +1321,38 @@ function CategoryEditModal(props: {
 
         {err && <p className="text-sm text-red-600">{err}</p>}
 
-        {/* Actions */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <input id="cascade" type="checkbox" checked={cascade} onChange={e => setCascade(e.target.checked)} />
-            <label htmlFor="cascade" className="text-sm">Cascade on delete</label>
+            <input
+              id="cascade"
+              type="checkbox"
+              checked={cascade}
+              onChange={e => setCascade(e.target.checked)}
+            />
+            <label htmlFor="cascade" className="text-sm">
+              Cascade on delete
+            </label>
           </div>
           <div className="flex gap-2">
-            <button className="btn" onClick={onClose} disabled={saving || deleting}>Close</button>
-            <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" onClick={save} disabled={saving}>
+            <button
+              className="btn"
+              onClick={onClose}
+              disabled={saving || deleting}
+            >
+              Close
+            </button>
+            <button
+              className="btn bg-indigo-600 text-white hover:bg-indigo-700"
+              onClick={save}
+              disabled={saving}
+            >
               {saving ? "Saving..." : "Save"}
             </button>
-            <button className="btn border border-red-600 text-red-700 hover:bg-red-50" onClick={removeCategory} disabled={deleting}>
+            <button
+              className="btn border border-red-600 text-red-700 hover:bg-red-50"
+              onClick={removeCategory}
+              disabled={deleting}
+            >
               {deleting ? "Deleting..." : "Delete"}
             </button>
           </div>
@@ -907,7 +1361,6 @@ function CategoryEditModal(props: {
     </Modal>
   );
 }
-
 
 /* ===== Add item and single edit ===== */
 function AddItemForm(props: {
@@ -932,29 +1385,25 @@ function AddItemForm(props: {
     online_sale_price: "",
   });
 
-  // Auto SKU controls
   const [autoSku, setAutoSku] = useState(true);
   const [seedMode, setSeedMode] = useState<"name" | "custom">("name");
   const [seedInput, setSeedInput] = useState("");
   const counterRef = useRef(0);
 
-  // compute current seed
   const seed = useMemo(() => {
     if (seedMode === "custom" && seedInput.trim()) return clampSeed(seedInput);
     return clampSeed(f.item_name);
   }, [seedMode, seedInput, f.item_name]);
 
-  // regenerate SKU when auto mode or seed changes
   useEffect(() => {
     if (!autoSku) return;
-    setF((cur) => ({ ...cur, sku: formatSku(seed, counterRef.current) }));
+    setF(cur => ({ ...cur, sku: formatSku(seed, counterRef.current) }));
   }, [autoSku, seed]);
 
-  // simple increment helper
   const bumpSku = () => {
     counterRef.current = (counterRef.current + 1) % 10000;
     const next = formatSku(seed, counterRef.current);
-    setF((cur) => ({ ...cur, sku: next }));
+    setF(cur => ({ ...cur, sku: next }));
     return next;
   };
 
@@ -968,11 +1417,10 @@ function AddItemForm(props: {
         setSaving(true);
         setErr(null);
 
-        // ensure SKU present
         let sku = f.sku.trim().toUpperCase();
         if (autoSku && !/^[A-Z]{3}\d{4}$/.test(sku)) {
           sku = formatSku(seed, counterRef.current);
-          setF((cur) => ({ ...cur, sku }));
+          setF(cur => ({ ...cur, sku }));
         }
 
         const payload = {
@@ -981,11 +1429,12 @@ function AddItemForm(props: {
           description: f.description.trim() || null,
           current_quantity: f.qty ? Number(f.qty) : 0,
           price: f.price ? Number(f.price) : null,
-          online_sale_price: f.online_sale_price ? Number(f.online_sale_price) : null,
+          online_sale_price: f.online_sale_price
+            ? Number(f.online_sale_price)
+            : null,
         };
 
         try {
-          // try up to 5 times on duplicate
           const MAX_TRIES = 5;
           for (let i = 0; i < MAX_TRIES; i++) {
             try {
@@ -993,10 +1442,11 @@ function AddItemForm(props: {
               setSaving(false);
               return;
             } catch (e: any) {
-              // detect duplicate by status if available or by message text
               const status = e?.status ?? e?.response?.status;
               const msg = String(e?.message || "");
-              const isConflict = status === 409 || /already exists|duplicate|conflict/i.test(msg);
+              const isConflict =
+                status === 409 ||
+                /already exists|duplicate|conflict/i.test(msg);
               if (autoSku && isConflict) {
                 payload.sku = i === 0 ? nextSku(payload.sku) : bumpSku();
                 continue;
@@ -1004,7 +1454,6 @@ function AddItemForm(props: {
               throw e;
             }
           }
-          // final attempt bump once more
           payload.sku = bumpSku();
           await onSave(payload);
         } catch (e: any) {
@@ -1015,7 +1464,6 @@ function AddItemForm(props: {
       }}
       className="grid gap-3"
     >
-      {/* Auto SKU controls */}
       <div className="rounded-xl border p-3 space-y-2">
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -1105,7 +1553,9 @@ function AddItemForm(props: {
           step="0.01"
           placeholder="Online sale price"
           value={f.online_sale_price}
-          onChange={(e) => setF({ ...f, online_sale_price: e.target.value })}
+          onChange={(e) =>
+            setF({ ...f, online_sale_price: e.target.value })
+          }
         />
       </div>
       {err && <p className="text-sm text-red-600">{err}</p>}
@@ -1113,7 +1563,11 @@ function AddItemForm(props: {
         <button className="btn" type="button" onClick={onCancel} disabled={saving}>
           Cancel
         </button>
-        <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" disabled={saving} type="submit">
+        <button
+          className="btn bg-indigo-600 text-white hover:bg-indigo-700"
+          disabled={saving}
+          type="submit"
+        >
           {saving ? "Saving…" : "Save"}
         </button>
       </div>
@@ -1123,22 +1577,41 @@ function AddItemForm(props: {
 
 function SingleEditForm(props: { sku: string; onCancel: () => void; onSaved: () => void }) {
   const { sku, onCancel, onSaved } = props;
-  const [base, setBase] = useState<{ item_name: string; description: string; price: string }>(
-    { item_name: "", description: "", price: "" }
-  );
+  const [base, setBase] = useState<{ item_name: string; description: string; price: string }>({
+    item_name: "",
+    description: "",
+    price: "",
+  });
   const [qtyDelta, setQtyDelta] = useState<string>("");
   const [qtyAbs, setQtyAbs] = useState<string>("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [more, setMore] = useState<Record<string, string>>({
-    online_sale_price: "", variation_name: "",
-    seo_title: "", seo_description: "", permalink: "", gtin: "",
-    square_online_item_visibility: "", item_type: "",
-    social_media_link_title: "", social_media_link_description: "",
-    shipping_enabled: "", self_serve_ordering: "", delivery_enabled: "", pickup_enabled: "",
-    sellable: "", contains_alcohol: "", stockable: "", skip_detail_screen_in_pos: "",
-    option_name_1: "", option_value_1: "", stock_alert_enabled: "", stock_alert_count: "", modifier: "",
+    online_sale_price: "",
+    variation_name: "",
+    seo_title: "",
+    seo_description: "",
+    permalink: "",
+    gtin: "",
+    square_online_item_visibility: "",
+    item_type: "",
+    social_media_link_title: "",
+    social_media_link_description: "",
+    shipping_enabled: "",
+    self_serve_ordering: "",
+    delivery_enabled: "",
+    pickup_enabled: "",
+    sellable: "",
+    contains_alcohol: "",
+    stockable: "",
+    skip_detail_screen_in_pos: "",
+    option_name_1: "",
+    option_value_1: "",
+    stock_alert_enabled: "",
+    stock_alert_count: "",
+    modifier: "",
   });
-  const [err, setErr] = useState<string | null>(null); const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1149,13 +1622,20 @@ function SingleEditForm(props: { sku: string; onCancel: () => void; onSaved: () 
           description: it.description ?? "",
           price: it.price == null ? "" : String(it.price),
         });
-        setMore(m => ({ ...m, online_sale_price: (it.online_sale_price == null ? "" : String(it.online_sale_price)) }));
-      } catch (e: any) { setErr(e?.message || "Failed to load item"); }
+        setMore(m => ({
+          ...m,
+          online_sale_price:
+            it.online_sale_price == null ? "" : String(it.online_sale_price),
+        }));
+      } catch (e: any) {
+        setErr(e?.message || "Failed to load item");
+      }
     })();
   }, [sku]);
 
   async function submit() {
-    setSaving(true); setErr(null);
+    setSaving(true);
+    setErr(null);
     try {
       const patch: Record<string, any> = {};
       if (base.item_name.trim()) patch.item_name = base.item_name.trim();
@@ -1163,40 +1643,118 @@ function SingleEditForm(props: { sku: string; onCancel: () => void; onSaved: () 
       if (base.price.trim()) patch.price = Number(base.price);
       if (moreOpen) {
         for (const [k, v] of Object.entries(more)) {
-          if (v.trim() !== "") patch[k] = ["online_sale_price", "stock_alert_count"].includes(k) ? Number(v) : v;
+          if (v.trim() !== "") {
+            patch[k] = ["online_sale_price", "stock_alert_count"].includes(k)
+              ? Number(v)
+              : v;
+          }
         }
       }
       if (qtyAbs.trim() !== "") patch.current_quantity = Number(qtyAbs);
       else if (qtyDelta.trim() !== "") patch.quantityDelta = Number(qtyDelta);
 
-      await api(`/items/${encodeURIComponent(sku)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      await api(`/items/${encodeURIComponent(sku)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
       onSaved();
-    } catch (e: any) { setErr(e?.message || "Failed to update item"); } finally { setSaving(false); }
+    } catch (e: any) {
+      setErr(e?.message || "Failed to update item");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); void submit(); }} className="space-y-3">
-      <input className="input" placeholder="Name" value={base.item_name} onChange={e => setBase({ ...base, item_name: e.target.value })} />
-      <textarea className="input" placeholder="Description" value={base.description} onChange={e => setBase({ ...base, description: e.target.value })} />
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+      className="space-y-3"
+    >
+      <input
+        className="input"
+        placeholder="Name"
+        value={base.item_name}
+        onChange={e => setBase({ ...base, item_name: e.target.value })}
+      />
+      <textarea
+        className="input"
+        placeholder="Description"
+        value={base.description}
+        onChange={e => setBase({ ...base, description: e.target.value })}
+      />
       <div className="grid grid-cols-3 gap-3">
-        <input className="input" type="number" step="0.01" placeholder="Price" value={base.price} onChange={e => setBase({ ...base, price: e.target.value })} />
-        <input className="input" type="number" placeholder="Δ quantity" value={qtyDelta} onChange={e => { setQtyDelta(e.target.value); setQtyAbs(""); }} />
-        <input className="input" type="number" placeholder="Set absolute qty" value={qtyAbs} onChange={e => { setQtyAbs(e.target.value); setQtyDelta(""); }} />
+        <input
+          className="input"
+          type="number"
+          step="0.01"
+          placeholder="Price"
+          value={base.price}
+          onChange={e => setBase({ ...base, price: e.target.value })}
+        />
+        <input
+          className="input"
+          type="number"
+          placeholder="Δ quantity"
+          value={qtyDelta}
+          onChange={e => {
+            setQtyDelta(e.target.value);
+            setQtyAbs("");
+          }}
+        />
+        <input
+          className="input"
+          type="number"
+          placeholder="Set absolute qty"
+          value={qtyAbs}
+          onChange={e => {
+            setQtyAbs(e.target.value);
+            setQtyDelta("");
+          }}
+        />
       </div>
       <div className="rounded-xl border">
-        <button className="w-full px-3 py-2 text-left text-sm" type="button" onClick={() => setMoreOpen(!moreOpen)}>More fields</button>
+        <button
+          className="w-full px-3 py-2 text-left text-sm"
+          type="button"
+          onClick={() => setMoreOpen(!moreOpen)}
+        >
+          More fields
+        </button>
         {moreOpen && (
           <div className="border-t p-3 grid gap-2">
             {Object.keys(more).map(k => (
-              <input key={k} className="input" placeholder={k} value={more[k]} onChange={e => setMore({ ...more, [k]: e.target.value })} />
+              <input
+                key={k}
+                className="input"
+                placeholder={k}
+                value={more[k]}
+                onChange={e =>
+                  setMore({
+                    ...more,
+                    [k]: e.target.value,
+                  })
+                }
+              />
             ))}
           </div>
         )}
       </div>
       {err && <p className="text-sm text-red-600">{err}</p>}
       <div className="flex justify-end gap-2">
-        <button className="btn" type="button" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button className="btn bg-indigo-600 text-white hover:bg-indigo-700" type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+        <button className="btn" type="button" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+        <button
+          className="btn bg-indigo-600 text-white hover:bg-indigo-700"
+          type="submit"
+          disabled={saving}
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
       </div>
     </form>
   );
