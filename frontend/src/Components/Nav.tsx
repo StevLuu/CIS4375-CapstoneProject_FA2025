@@ -29,6 +29,7 @@ export default function Nav() {
         {/* Center: Main Nav (only when logged in) */}
         {loggedIn && (
           <nav className="flex-1 flex justify-center items-center gap-3">
+{/*  REMOVED / parking lot          
             <NavLink
               to="/dashboard"
               className={({ isActive }) =>
@@ -36,7 +37,7 @@ export default function Nav() {
               }
             >
               Dashboard
-            </NavLink>
+            </NavLink> */}
             <NavLink
               to="/inventory"
               className={({ isActive }) =>
@@ -45,6 +46,7 @@ export default function Nav() {
             >
               Inventory
             </NavLink>
+{/*  REMOVED/ redundant with log page           
             <NavLink
               to="/sales"
               className={({ isActive }) =>
@@ -52,7 +54,7 @@ export default function Nav() {
               }
             >
               Sales
-            </NavLink>
+            </NavLink> */}
             <NavLink
               to="/logs"
               className={({ isActive }) =>
