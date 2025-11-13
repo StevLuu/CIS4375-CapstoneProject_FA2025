@@ -1,3 +1,4 @@
+// frontend/src/Components/auth/SignupModal.tsx
 import { useState } from "react";
 import Modal from "../ui/Modal";
 import { api } from "../../lib/api";
@@ -25,12 +26,25 @@ export function SignupModal({ open, onClose, onSuccess }: SignupModalProps) {
       alert(msg);
       return;
     }
+
     setSubmitting(true);
     setError(null);
+
     try {
-      await api<void>("/auth/signup", {json: { email, password, squareUsername: squareUsername || null },});
+      const payload: { email: string; password: string; squareUsername?: string } = {
+        email,
+        password,
+      };
+
+      const trimmed = squareUsername.trim();
+      if (trimmed) {
+        payload.squareUsername = trimmed;
+      }
+
+      await api<void>("/auth/signup", { json: payload });
+
       onClose();
-      onSuccess?.(); // parent will open Login modal
+      onSuccess?.();
     } catch (err: any) {
       const msg = err?.message || "Signup failed";
       setError(msg);
@@ -39,6 +53,7 @@ export function SignupModal({ open, onClose, onSuccess }: SignupModalProps) {
       setSubmitting(false);
     }
   }
+
 
   return (
     <Modal open={open} onClose={onClose} title="Create account">
