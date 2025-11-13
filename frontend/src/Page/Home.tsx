@@ -43,7 +43,7 @@ export default function Home() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5 }}
-      >
+      >  
         <NavLink
           to="/dashboard"
           className="px-6 py-3 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition"
@@ -59,7 +59,8 @@ export default function Home() {
       </motion.div>
 
       <motion.div
-        className="grid sm:grid-cols-3 gap-6 max-w-4xl mx-auto pt-16"
+      //className="grid sm:grid-cols-3 gap-6 max-w-4xl mx-auto pt-16"
+        className="grid sm:grid-cols-2 gap-6 max-w-4xl mx-auto pt-16"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.8 }}
@@ -73,10 +74,10 @@ export default function Home() {
             title: "Real-Time Updates",
             text: "Quick entry and CSV imports keep stock levels synced.",
           },
-          {
-            title: "Vendor Insights",
-            text: "Visualize trends and low-stock alerts with clear analytics.",
-          },
+          // {
+          //   title: "Vendor Insights",
+          //   text: "Visualize trends and low-stock alerts with clear analytics.",
+          // },
         ].map((card, i) => (
           <div
             key={i}
