@@ -50,10 +50,10 @@ const CSV_TYPE = "csv_import";
 export default function Logs() {
   const { loggedIn, user, refresh } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
-  useEffect(() => { if (!loggedIn || !user?.email) setShowLogin(true); }, [loggedIn, user]);
+  // useEffect(() => { if (!loggedIn || !user?.email) setShowLogin(true); }, [loggedIn, user]);
 
   // UI filter
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("Regular Logs");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
 
   // Data
   const [rows, setRows] = useState<LogRowLean[]>([]);
@@ -160,7 +160,7 @@ export default function Logs() {
       <p className="text-neutral-500">Recent activity.</p>
 
       {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
+      {/* <div className="flex gap-2 flex-wrap">
         {TYPE_FILTERS.map((t) => (
           <button
             key={t}
@@ -170,7 +170,7 @@ export default function Logs() {
             {t}
           </button>
         ))}
-      </div>
+      </div> */}
 
       {error && <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-lg p-3">{error}</div>}
 
