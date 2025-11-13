@@ -9,6 +9,79 @@ router.use(requireAuth);
 // TODO: add DB index for archived filter once migrations are allowed:
 // TODO: CREATE INDEX idx_item_user_archived ON "item"(user_id, archived);
 
+// Coercers
+const toStrOrNull = (v: any): string | null => {
+    if (v === undefined) return null;
+    const s = String(v ?? "").trim();
+    return s === "" ? null : s;
+  };
+  const toNumOrNull = (v: any): number | null => {
+    if (v === undefined || v === null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const toIntOrNull = (v: any): number | null => {
+    const n = toNumOrNull(v);
+    return n == null ? null : Math.trunc(n);
+  };
+  const toYNorUndef = (v: any): "Y" | "N" | undefined => {
+    if (v === undefined || v === null || v === "") return undefined;
+    const s = String(v).trim().toUpperCase();
+    return s === "Y" || s === "N" ? s : undefined;
+  };
+  
+  // Only include columns that exist on table item
+  const FIELD_SPECS: Record<string, (v: unknown) => any> = {
+    // core
+    item_name: v => toStrOrNull(v),
+    description: v => toStrOrNull(v),
+    price: v => toNumOrNull(v),
+    online_sale_price: v => toNumOrNull(v),
+  
+    // extended columns present in your schema
+    reference_handle: v => toStrOrNull(v),
+    token: v => toStrOrNull(v),
+    variation_name: v => toStrOrNull(v),
+    seo_title: v => toStrOrNull(v),
+    seo_description: v => toStrOrNull(v),
+    permalink: v => toStrOrNull(v),
+    gtin: v => toStrOrNull(v),
+    square_online_item_visibility: v => toStrOrNull(v),
+    item_type: v => toStrOrNull(v),
+    social_media_link_title: v => toStrOrNull(v),
+    social_media_link_description: v => toStrOrNull(v),
+  
+    shipping_enabled: v => toYNorUndef(v),
+    self_serve_ordering: v => toYNorUndef(v),
+    delivery_enabled: v => toYNorUndef(v),
+    pickup_enabled: v => toYNorUndef(v),
+    archived: v => toYNorUndef(v),
+    sellable: v => toYNorUndef(v),
+    contains_alcohol: v => toYNorUndef(v),
+    stockable: v => toYNorUndef(v),
+    skip_detail_screen_in_pos: v => toYNorUndef(v),
+  
+    option_name_1: v => toStrOrNull(v),
+    option_value_1: v => toStrOrNull(v),
+  
+    stock_alert_enabled: v => toYNorUndef(v),
+    stock_alert_count: v => toIntOrNull(v),
+  
+    modifier: v => toStrOrNull(v),
+  };
+  
+  function buildItemPatch(patch: Record<string, any>): Record<string, any> {
+    const data: Record<string, any> = {};
+    for (const [k, coerce] of Object.entries(FIELD_SPECS)) {
+      if (patch[k] !== undefined) {
+        const val = coerce(patch[k]);
+        if (val !== undefined) data[k] = val; // undefined means skip
+      }
+    }
+    return data;
+  }
+  
+
 function asNumber(d: any): number | null {
     if (d === null || d === undefined) return null;
     if (typeof d === "number") return d;
@@ -84,7 +157,8 @@ router.get("/by-category", async (req, res, next) => {
                 where.category_item = { some: { category_id: categoryId } };
             } else {
                 // subtree query via recursive CTE then IN list
-                const rows: Array<{ category_id: number }> = await prisma.$queryRaw`
+                const rows = await prisma.$queryRaw<Array<{ category_id: number }>>` 
+
           WITH RECURSIVE subcats AS (
             SELECT c.category_id
             FROM "category" c
@@ -121,18 +195,25 @@ router.get("/by-category", async (req, res, next) => {
 // GET /items/categories?skus=AAA,BBB,CCC
 router.get("/categories", async (req, res, next) => {
     try {
-        const userId = req.user!.user_id;
-        const skus = String(req.query.skus ?? "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        if (!skus.length) return res.status(400).json({ error: "skus is required" });
-
-        type Row = { sku: string; category_id: number; category_name: string; parent_category_id: number | null };
-
-        // Climb up from each linked category to root
-        const rows: Row[] = await prisma.$queryRaw`
-        WITH roots AS (
+      const userId = req.user!.user_id;
+      const skus = String(req.query.skus ?? "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+  
+      if (!skus.length) {
+        return res.status(400).json({ error: "skus is required" });
+      }
+  
+      type Row = {
+        sku: string;
+        category_id: number;
+        category_name: string;
+        parent_category_id: number | null;
+      };
+  
+      const rows = await prisma.$queryRaw<Row[]>`
+        WITH RECURSIVE roots AS (
           SELECT DISTINCT ci.sku, ci.category_id
           FROM "category_item" ci
           WHERE ci.user_id = ${userId} AND ci.sku = ANY(${skus}::text[])
@@ -140,54 +221,59 @@ router.get("/categories", async (req, res, next) => {
         up AS (
           SELECT r.sku, c.category_id, c.category_name, c.parent_category_id
           FROM roots r
-          JOIN "category" c ON c.user_id = ${userId} AND c.category_id = r.category_id
+          JOIN "category" c
+            ON c.user_id = ${userId}
+           AND c.category_id = r.category_id
           UNION ALL
           SELECT u.sku, p.category_id, p.category_name, p.parent_category_id
           FROM up u
-          JOIN "category" p ON p.user_id = ${userId} AND u.parent_category_id = p.category_id
+          JOIN "category" p
+            ON p.user_id = ${userId}
+           AND u.parent_category_id = p.category_id
         )
         SELECT DISTINCT sku, category_id, category_name, parent_category_id
         FROM up;
       `;
-
-        // Build byId lookup of categories
-        type CatRow = { category_id: number; category_name: string; parent_category_id: number | null };
-        const byId = new Map<number, CatRow>();
-        for (const r of rows) {
-            if (!byId.has(r.category_id)) {
-                byId.set(r.category_id, {
-                    category_id: r.category_id,
-                    category_name: r.category_name,
-                    parent_category_id: r.parent_category_id,
-                });
-            }
+  
+      // Build lookup by id
+      type CatRow = { category_id: number; category_name: string; parent_category_id: number | null };
+      const byId = new Map<number, CatRow>();
+      for (const r of rows) {
+        if (!byId.has(r.category_id)) {
+          byId.set(r.category_id, {
+            category_id: r.category_id,
+            category_name: r.category_name,
+            parent_category_id: r.parent_category_id,
+          });
         }
-
-        // List the direct category links per SKU
-        const pairs = await prisma.category_item.findMany({
-            where: { user_id: userId, sku: { in: skus } },
-            select: { sku: true, category_id: true },
-        });
-
-        // Build breadcrumb paths per SKU
-        const bySku: Record<string, Array<Array<{ category_id: number; category_name: string }>>> = {};
-        for (const { sku, category_id } of pairs) {
-            const path: Array<{ category_id: number; category_name: string }> = [];
-            let cur: CatRow | undefined = byId.get(category_id);
-            while (cur) {
-                path.push({ category_id: cur.category_id, category_name: cur.category_name });
-                cur = cur.parent_category_id ? byId.get(cur.parent_category_id) : undefined;
-            }
-            path.reverse();
-            bySku[sku] = bySku[sku] ?? [];
-            bySku[sku].push(path);
+      }
+  
+      // Direct links per SKU
+      const pairs = await prisma.category_item.findMany({
+        where: { user_id: userId, sku: { in: skus } },
+        select: { sku: true, category_id: true },
+      });
+  
+      const bySku: Record<string, Array<Array<{ category_id: number; category_name: string }>>> = {};
+      for (const { sku, category_id } of pairs) {
+        const path: Array<{ category_id: number; category_name: string }> = [];
+        let cur = byId.get(category_id);
+        while (cur) {
+          path.push({ category_id: cur.category_id, category_name: cur.category_name });
+          cur = cur.parent_category_id ? byId.get(cur.parent_category_id) : undefined;
         }
-
-        res.json(bySku);
+        path.reverse();
+        if (!path.length) continue;
+        if (!bySku[sku]) bySku[sku] = [];
+        bySku[sku].push(path);
+      }
+  
+      res.json(bySku);
     } catch (err) {
-        next(err);
+      next(err);
     }
-});
+  });
+  
 
 /** ---------- New: archive toggle ---------- **/
 
@@ -216,120 +302,127 @@ router.patch("/:sku/archive", async (req, res, next) => {
 /** ---------- New: batch edit ---------- **/
 
 // POST /items/batch
-// Body: { updates: Array<{ sku: string, patch?: Record<string, any>, current_quantity?: number }> }
+// Body: { updates: Array<{ sku: string; patch?: Record<string, any>; current_quantity?: number }> }
 router.post("/batch", async (req, res, next) => {
     try {
-        const userId = req.user!.user_id;
-        const updates: Array<{ sku: string; patch?: any; current_quantity?: number }> =
-            Array.isArray(req.body?.updates) ? req.body.updates : [];
-        if (!updates.length) return res.status(400).json({ error: "updates is required" });
-        if (updates.length > 200) return res.status(400).json({ error: "batch limit is 200" });
-
-        // prepare quantity deltas for log
-        const needAbs = updates.filter(u => typeof u.current_quantity === "number");
-        const beforeMap: Record<string, number> = {};
-
-        if (needAbs.length) {
-            const rows = await prisma.item.findMany({
-                where: { user_id: userId, sku: { in: needAbs.map(u => u.sku) } },
-                select: { sku: true, current_quantity: true },
-            });
-            for (const r of rows) beforeMap[r.sku] = r.current_quantity ?? 0;
-        }
-
-        const result = await prisma.$transaction(async (tx) => {
-            const lines: Array<{ sku: string; delta: number }> = [];
-            const failed: Array<{ sku: string; error: string }> = [];
-            const ok: string[] = [];
-
-            for (const u of updates) {
-                try {
-                    const data: any = {};
-                    if (u.patch && typeof u.patch === "object") {
-                        // allow only whitelisted fields
-                        const {
-                            item_name,
-                            description,
-                            price,              // number or null
-                            online_sale_price,  // number or null but will remain untouched unless provided by user
-                            archived,
-                            // add more allowed fields when needed
-                        } = u.patch;
-
-                        if (item_name !== undefined) data.item_name = String(item_name);
-                        if (description !== undefined) data.description = description ?? null;
-                        if (price !== undefined) data.price = price != null ? Number(price) : null;
-                        if (online_sale_price !== undefined) data.online_sale_price = online_sale_price != null ? Number(online_sale_price) : null;
-                        if (archived !== undefined) {
-                            const a = String(archived).toUpperCase();
-                            if (a === "Y" || a === "N") data.archived = a;
-                        }
-                    }
-                    if (typeof u.current_quantity === "number") {
-                        data.current_quantity = Math.trunc(u.current_quantity);
-                        const before = beforeMap[u.sku] ?? 0;
-                        const delta = Math.trunc(u.current_quantity) - before;
-                        if (delta !== 0) lines.push({ sku: u.sku, delta });
-                    }
-
-                    await tx.item.update({
-                        where: { sku_user_id: { sku: u.sku, user_id: userId } },
-                        data,
-                    });
-
-                    ok.push(u.sku);
-                } catch (e: any) {
-                    failed.push({ sku: u.sku, error: e?.message ?? "update failed" });
-                }
-            }
-
-            let log_id: number | undefined = undefined;
-            if (lines.length) {
-                log_id = await writeLogWithLines(userId, "bulk_edit", lines);
-            }
-
-            return { ok, failed, log_id };
+      const userId = req.user!.user_id;
+      const updates: Array<{ sku: string; patch?: any; current_quantity?: number }> =
+        Array.isArray(req.body?.updates) ? req.body.updates : [];
+      if (!updates.length) return res.status(400).json({ error: "updates is required" });
+      if (updates.length > 200) return res.status(400).json({ error: "batch limit is 200" });
+  
+      // Preload before quantities for absolute set logging
+      const needAbs = updates.filter(u => typeof u.current_quantity === "number");
+      const beforeMap: Record<string, number> = {};
+      if (needAbs.length) {
+        const rows = await prisma.item.findMany({
+          where: { user_id: userId, sku: { in: needAbs.map(u => u.sku) } },
+          select: { sku: true, current_quantity: true },
         });
-
-        res.json(result);
+        for (const r of rows) beforeMap[r.sku] = r.current_quantity ?? 0;
+      }
+  
+      const result = await prisma.$transaction(async (tx) => {
+        const ok: string[] = [];
+        const failed: Array<{ sku: string; error: string }> = [];
+        const lines: Array<{ sku: string; delta: number }> = [];
+  
+        for (const u of updates) {
+          try {
+            const data: any = {};
+            if (u.patch && typeof u.patch === "object") {
+              Object.assign(data, buildItemPatch(u.patch));
+            }
+            if (typeof u.current_quantity === "number") {
+              const abs = Math.trunc(u.current_quantity);
+              data.current_quantity = abs;
+              const before = beforeMap[u.sku] ?? 0;
+              const delta = abs - before;
+              if (delta !== 0) lines.push({ sku: u.sku, delta });
+            }
+  
+            await tx.item.update({
+              where: { sku_user_id: { sku: u.sku, user_id: userId } },
+              data,
+            });
+  
+            ok.push(u.sku);
+          } catch (e: any) {
+            failed.push({ sku: u.sku, error: e?.message ?? "update failed" });
+          }
+        }
+  
+        let log_id: number | undefined;
+        if (lines.length) {
+          log_id = await (async () => {
+            const log = await tx.log.create({
+              data: { user_id: userId, type: "bulk_edit" },
+              select: { log_id: true },
+            });
+            await tx.log_item.createMany({
+              data: lines.map(l => ({ log_id: log.log_id, sku: l.sku, user_id: userId, quantity: l.delta })),
+            });
+            return log.log_id;
+          })();
+        }
+  
+        return { ok, failed, log_id };
+      });
+  
+      res.json(result);
     } catch (err) {
-        next(err);
+      next(err);
     }
-});
+  });
+  
 
 // POST /items/batch-create
-// Body: { items: Array<{ sku: string; item_name: string; description?: string|null; current_quantity?: number; price?: number|null; online_sale_price?: number|null }>, note?: string }
+// Body: { items: Array<{ sku: string; item_name: string; ...extended }>, note?: string }
 router.post("/batch-create", async (req, res, next) => {
     try {
       const userId = req.user!.user_id;
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       const note = req.body?.note ? String(req.body.note) : null;
+  
       if (!items.length) return res.status(400).json({ error: "items is required" });
       if (items.length > 200) return res.status(400).json({ error: "batch limit is 200" });
   
-      const data = items.map((x: any) => ({
-        sku: String(x.sku),
-        user_id: userId,
-        item_name: String(x.item_name),
-        description: x.description ?? null,
-        current_quantity: Number.isFinite(Number(x.current_quantity)) ? Number(x.current_quantity) : 0,
-        price: x.price != null ? Number(x.price) : null,
-        online_sale_price: x.online_sale_price != null ? Number(x.online_sale_price) : null,
-      }));
+      // Build rows using same mapping as batch update
+      const rows = items.map((x: any) => {
+        const base: any = {
+          sku: String(x.sku),
+          user_id: userId,
+          item_name: String(x.item_name),
+          description: x.description ?? null,
+          current_quantity: Number.isFinite(Number(x.current_quantity)) ? Math.trunc(Number(x.current_quantity)) : 0,
+          // Decimal in Prisma. Use numbers, Prisma will coerce to Decimal
+          price: x.price != null && x.price !== "" ? Number(x.price) : null,
+          online_sale_price: x.online_sale_price != null && x.online_sale_price !== "" ? Number(x.online_sale_price) : null,
+        };
+        // Merge extended fields from CSV using the shared map
+        Object.assign(base, buildItemPatch(x));
+        return base;
+      });
   
       const result = await prisma.$transaction(async (tx) => {
-        await tx.item.createMany({ data, skipDuplicates: true });
-        const lines = data.map((d: { sku: any; current_quantity: any; }) => ({ sku: d.sku, quantity: d.current_quantity ?? 0 }));
+        await tx.item.createMany({ data: rows, skipDuplicates: true });
+  
+        // Log initial quantities for visibility. Keep your existing semantics.
         const log = await tx.log.create({
           data: { user_id: userId, type: "bulk_create", note },
           select: { log_id: true },
         });
-        if (lines.length) {
-          await tx.log_item.createMany({
-            data: lines.map((l: { sku: any; quantity: any; }) => ({ log_id: log.log_id, sku: l.sku, user_id: userId, quantity: l.quantity })),
-          });
+  
+        const lineData = rows.map((r: { sku: any; current_quantity: any; }) => ({
+          log_id: log.log_id,
+          sku: r.sku,
+          user_id: userId,
+          quantity: r.current_quantity ?? 0,
+        }));
+        if (lineData.length) {
+          await tx.log_item.createMany({ data: lineData });
         }
-        return { created: data.length, log_id: log.log_id };
+        return { created: rows.length, log_id: log.log_id };
       });
   
       res.status(201).json(result);
@@ -338,6 +431,7 @@ router.post("/batch-create", async (req, res, next) => {
       next(err);
     }
   });
+  
   
 
 /** ---------- Existing endpoints with Decimal normalization ---------- **/

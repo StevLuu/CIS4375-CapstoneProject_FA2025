@@ -5,52 +5,7 @@ import { LoginModal } from "../Components/auth/LoginModal";
 import { api, formatSku, nextSku } from "../lib/api";
 import { clampSeed } from "../lib/api";
 
-// 1) Add near other helpers
-// ===== Helpers for export =====
-type ItemFull = Record<string, any>;
-
-async function fetchAllItemsFull(): Promise<ItemFull[]> {
-  const out: ItemFull[] = [];
-  let cursor: string | null = null;
-  do {
-    const q = new URLSearchParams();
-    q.set("limit", "100");
-    if (cursor) q.set("cursor", cursor);
-    const page = await api<any>(`/items?${q.toString()}`);
-    for (const it of page.items) out.push(it as ItemFull);
-    cursor = page.nextCursor;
-  } while (cursor);
-  return out;
-}
-
-// Build Categories strings using /items/categories which returns breadcrumbs
-async function fetchCategoryPathsForSkus(skus: string[]): Promise<Record<string, string[]>> {
-  const result: Record<string, string[]> = {};
-  const CHUNK = 150; // keep query string safe
-  for (let i = 0; i < skus.length; i += CHUNK) {
-    const slice = skus.slice(i, i + CHUNK);
-    const q = new URLSearchParams({ skus: slice.join(",") });
-    // The route returns: { [sku]: Array<Array<{category_id, category_name}>> }
-    const resp = await api<Record<string, Array<Array<{ category_id: number; category_name: string }>>>>(
-      `/items/categories?${q.toString()}`
-    );
-    for (const [sku, paths] of Object.entries(resp)) {
-      // Convert each breadcrumb array to "A > B > C"
-      const strings = (paths || []).map(path => path.map(p => p.category_name).join(" > ")).filter(Boolean);
-      result[sku] = strings;
-    }
-  }
-  return result;
-}
-
-function csvCell(val: unknown): string {
-  if (val == null) return "";
-  const s = String(val).replace(/"/g, '""');
-  return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s}"` : s;
-}
-
-
-
+// ===== Types =====
 type ItemDTO = {
   sku: string;
   item_name: string;
@@ -62,27 +17,155 @@ type ItemDTO = {
 };
 type ItemsResp = { items: ItemDTO[]; nextCursor: string | null };
 type ParsedRow = Record<string, string | number | null | undefined>;
+type ItemFull = Record<string, any>;
 
+// ===== Helpers =====
+function csvCell(val: unknown): string {
+  if (val == null) return "";
+  const s = String(val).replace(/"/g, '""');
+  return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s}"` : s;
+}
+
+function toNumberOrNull(v: any): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string") {
+    const cleaned = v.replace(/[\$,]/g, "").trim();
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function toSnake(s: string): string {
+  return s.trim().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").toLowerCase().split(" ").join("_");
+}
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQ = false;
+  for (const ch of line) {
+    if (ch === '"' && !inQ) inQ = true;
+    else if (ch === '"' && inQ) inQ = false;
+    else if (ch === "," && !inQ) {
+      out.push(cur);
+      cur = "";
+      continue;
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out.map((cell) => cell.replace(/^"(.*)"$/, "$1").replace(/""/g, '"').trim());
+}
+
+// ===== API helpers =====
+async function fetchAllItems(): Promise<Map<string, ItemDTO>> {
+  const bySku = new Map<string, ItemDTO>();
+  let cursor: string | null = null;
+  do {
+    const q = new URLSearchParams();
+    q.set("limit", "100");
+    if (cursor) q.set("cursor", cursor);
+    const page = await api<ItemsResp>(`/items?${q.toString()}`);
+    page.items.forEach((it) => {
+      const stock = Number.isFinite(it.current_quantity) ? Number(it.current_quantity) : 0;
+      const price = typeof it.price === "string" ? Number(it.price) : it.price != null ? Number(it.price) : null;
+      const osp =
+        typeof it.online_sale_price === "string"
+          ? Number(it.online_sale_price)
+          : it.online_sale_price != null
+            ? Number(it.online_sale_price)
+            : null;
+      bySku.set(it.sku, { ...it, current_quantity: stock, price, online_sale_price: osp });
+    });
+    cursor = page.nextCursor;
+  } while (cursor);
+  return bySku;
+}
+
+// Tries multiple ways to get full item objects.
+async function fetchAllItemsFull(): Promise<ItemFull[]> {
+  const out: ItemFull[] = [];
+  let cursor: string | null = null;
+
+  // Attempt 1: ask backend for all fields if supported
+  try {
+    do {
+      const q = new URLSearchParams({ limit: "100", include: "all" });
+      if (cursor) q.set("cursor", cursor);
+      const page = await api<any>(`/items?${q.toString()}`);
+      if (page?.items?.length) page.items.forEach((it: any) => out.push(it));
+      cursor = page?.nextCursor ?? null;
+    } while (cursor);
+    if (out.length) return out;
+  } catch {
+    // ignore and fall back
+  }
+
+  // Attempt 2: normal list plus per page enrichment if backend includes fields already
+  try {
+    cursor = null;
+    do {
+      const q = new URLSearchParams({ limit: "100" });
+      if (cursor) q.set("cursor", cursor);
+      const page = await api<any>(`/items?${q.toString()}`);
+      if (page?.items?.length) page.items.forEach((it: any) => out.push(it));
+      cursor = page?.nextCursor ?? null;
+    } while (cursor);
+    if (out.length) return out;
+  } catch {
+    // ignore and fall back
+  }
+
+  // If everything fails, return empty list
+  return out;
+}
+
+// Build Categories strings using /items/categories which returns breadcrumbs
+async function fetchCategoryPathsForSkus(skus: string[]): Promise<Record<string, string[]>> {
+  const result: Record<string, string[]> = {};
+  const CHUNK = 150;
+  for (let i = 0; i < skus.length; i += CHUNK) {
+    const slice = skus.slice(i, i + CHUNK);
+    const q = new URLSearchParams({ skus: slice.join(",") });
+    try {
+      const resp = await api<Record<string, Array<Array<{ category_id: number; category_name: string }>>>>(
+        `/items/categories?${q.toString()}`
+      );
+      for (const [sku, paths] of Object.entries(resp || {})) {
+        const strings = (paths || [])
+          .map((path) => path.map((p) => p.category_name).join(" > "))
+          .filter(Boolean);
+        result[sku] = strings;
+      }
+    } catch {
+      // route not available
+    }
+  }
+  return result;
+}
+
+// ===== Component =====
 export default function CSV() {
   const { loggedIn, user, refresh } = useAuth();
-  const [showLogin, setShowLogin] = useState(false);
-  useEffect(() => {
-    if (!loggedIn || !user?.email) setShowLogin(true);
-  }, [loggedIn, user]);
+  // const [showLogin, setShowLogin] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [status, setStatus] = useState<string>("");
+  const [details, setDetails] = useState<string>("");
+  const [autoCreate, setAutoCreate] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const squareSuffixRef = useRef<string>("");
+
+  // useEffect(() => {
+  //   if (!loggedIn || !user?.email) setShowLogin(true);
+  // }, [loggedIn, user]);
+
   useEffect(() => {
     const saved = (user as any)?.squareUsername;
     if (saved && typeof saved === "string" && saved.trim()) {
       squareSuffixRef.current = saved.trim();
     }
   }, [user]);
-
-  const [file, setFile] = useState<File | null>(null);
-  const [status, setStatus] = useState<string>("");
-  const [details, setDetails] = useState<string>("");
-  const [autoCreate, setAutoCreate] = useState(true);
-  const [creating, setCreating] = useState(false);
-
-  const squareSuffixRef = useRef<string>("");
 
   const squareUsername = useMemo(
     () => (user as any)?.squareUsername || (user as any)?.username || "",
@@ -96,29 +179,10 @@ export default function CSV() {
     setDetails("");
   };
 
-  function splitCsvLine(line: string): string[] {
-    const out: string[] = [];
-    let cur = "";
-    let inQ = false;
-    for (const ch of line) {
-      if (ch === '"' && !inQ) inQ = true;
-      else if (ch === '"' && inQ) inQ = false;
-      else if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
-      else cur += ch;
-    }
-    out.push(cur);
-    return out.map((cell) => cell.replace(/^"(.*)"$/, "$1").replace(/""/g, '"').trim());
-  }
-
-  // detect the trailing Square username token from the header row
+  // Detect the trailing Square username token from the header row
   function detectSquareSuffix(firstHeaderLine: string): string | null {
     const cols: string[] = splitCsvLine(firstHeaderLine);
-    const bases = [
-      "Current Quantity",
-      "New Quantity",
-      "Stock Alert Enabled",
-      "Stock Alert Count",
-    ];
+    const bases = ["Current Quantity", "New Quantity", "Stock Alert Enabled", "Stock Alert Count"];
     const found: string[] = [];
     for (const h of cols) {
       for (const b of bases) {
@@ -129,13 +193,13 @@ export default function CSV() {
     if (found.length === 0) return null;
     const freq = new Map<string, number>();
     for (const f of found) freq.set(f, (freq.get(f) ?? 0) + 1);
-    let best: string = found[0]!;
+    let best = found[0]!;
     let bestN = 0;
     for (const [k, v] of freq) if (v > bestN) { best = k; bestN = v; }
     return best;
   }
 
-  // strip the detected username from known Square headers
+  // Strip the detected username from known Square headers
   function stripKnownSuffix(h: string): string {
     const sfx = squareSuffixRef.current;
     if (!sfx) return h;
@@ -146,35 +210,27 @@ export default function CSV() {
     const m = pattern.exec(h);
     return m && m[1] ? m[1] : h;
   }
-  
-
-  function toSnake(s: string): string {
-    return s.trim().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").toLowerCase().split(" ").join("_");
-  }
 
   function normalizeHeader(h: string): string {
-    // remove dynamic suffix for Square quantity headers
     const baseHeader = stripKnownSuffix(h).trim();
-  
-    // exact titles first (case-insensitive)
     const key = baseHeader.toLowerCase();
-  
+
     switch (key) {
-      case "Reference Handle": return "reference_handle";
-      case "Token": return "token";
+      case "reference handle": return "reference_handle";
+      case "token": return "token";
       case "item name": return "item_name";
       case "variation name": return "variation_name";
       case "sku": return "sku";
       case "description": return "description";
-      case "categories": return "categories";              // parsed later into paths
-      case "reporting category": return "reporting_category"; // optional, ignored on write
+      case "categories": return "categories";
+      case "reporting category": return "reporting_category";
       case "seo title": return "seo_title";
       case "seo description": return "seo_description";
       case "permalink": return "permalink";
       case "gtin": return "gtin";
       case "square online item visibility": return "square_online_item_visibility";
       case "item type": return "item_type";
-      case "weight (lb)": return "weight_lb";              // not in schema, ignore on write
+      case "weight (lb)": return "weight_lb";
       case "social media link title": return "social_media_link_title";
       case "social media link description": return "social_media_link_description";
       case "shipping enabled": return "shipping_enabled";
@@ -190,17 +246,15 @@ export default function CSV() {
       case "skip detail screen in pos": return "skip_detail_screen_in_pos";
       case "option name 1": return "option_name_1";
       case "option value 1": return "option_value_1";
-      case "current quantity": return "current_quantity";  // came in with suffix, now stripped
-      case "new quantity": return "new_quantity";          // used to compute abs qty
+      case "current quantity": return "current_quantity";
+      case "new quantity": return "new_quantity";
       case "stock alert enabled": return "stock_alert_enabled";
       case "stock alert count": return "stock_alert_count";
       case "modifier set - holographic": return "modifier";
       default:
-        // fallback: snake
         return toSnake(baseHeader);
     }
   }
-  
 
   function parseCsv(text: string): ParsedRow[] {
     const rows: ParsedRow[] = [];
@@ -212,26 +266,31 @@ export default function CSV() {
       if (ch === '"' && !inQ) inQ = true;
       else if (ch === '"' && inQ) inQ = false;
       else if (ch === "," && !inQ) cur += "\u0001";
-      else if (ch === "\n" && !inQ) { lines.push(cur); cur = ""; }
-      else cur += ch;
+      else if (ch === "\n" && !inQ) {
+        lines.push(cur);
+        cur = "";
+      } else cur += ch;
     }
     if (cur.length) lines.push(cur);
 
-    const splitLine = (s: string): string[] =>
-      s.split("\u0001").map((cell) =>
-        cell.replace(/^"(.*)"$/, "$1").replace(/""/g, '"').trim()
-      );
+    const split = (s: string) =>
+      s.split("\u0001").map((cell) => cell.replace(/^"(.*)"$/, "$1").replace(/""/g, '"').trim());
 
     if (!lines.length) return rows;
 
-    const headers = (splitLine(lines[0] ?? "")).map((h) => normalizeHeader(String(h)));
+    const headers = (split(lines[0] ?? "")).map((h) => normalizeHeader(String(h)));
 
     for (let r = 1; r < lines.length; r++) {
       const line = lines[r];
       if (typeof line !== "string" || !line.trim()) continue;
 
-      const cells = splitLine(line);
-      if (cells.length === 1 && cells[0] === "") continue;
+      const cells = split(line);
+
+      // New: skip rows where every cell is empty
+      if (cells.every((cell) => cell === "")) continue;
+
+      // Old single column guard is now redundant but harmless
+      //if (cells.length === 1 && cells[0] === "") continue;
 
       const row: ParsedRow = {};
       for (let c = 0; c < headers.length; c++) {
@@ -244,43 +303,14 @@ export default function CSV() {
     return rows;
   }
 
-  async function fetchAllItems(): Promise<Map<string, ItemDTO>> {
-    const bySku = new Map<string, ItemDTO>();
-    let cursor: string | null = null;
-    do {
-      const q = new URLSearchParams();
-      q.set("limit", "100");
-      if (cursor) q.set("cursor", cursor);
-      const page = await api<ItemsResp>(`/items?${q.toString()}`);
-      page.items.forEach((it) => {
-        const stock = Number.isFinite(it.current_quantity) ? Number(it.current_quantity) : 0;
-        const price =
-          typeof it.price === "string" ? Number(it.price) : it.price != null ? Number(it.price) : null;
-        const osp =
-          typeof it.online_sale_price === "string"
-            ? Number(it.online_sale_price)
-            : it.online_sale_price != null
-              ? Number(it.online_sale_price)
-              : null;
-        bySku.set(it.sku, { ...it, current_quantity: stock, price, online_sale_price: osp });
-      });
-      cursor = page.nextCursor;
-    } while (cursor);
-    return bySku;
-  }
-
-  function toNumberOrNull(v: any): number | null {
-    if (v === null || v === undefined || v === "") return null;
-    if (typeof v === "number") return Number.isFinite(v) ? v : null;
-    if (typeof v === "string") {
-      const cleaned = v.replace(/[\$,]/g, "").trim();
-      const n = Number(cleaned);
-      return Number.isFinite(n) ? n : null;
-    }
-    return null;
-  }
-
   function planChanges(rows: ParsedRow[], inventory: Map<string, ItemDTO>) {
+    //  const ignored: string[] = [];
+    const ignoredStats = {
+      noSkuNoName: 0,
+      skuButNoName: 0,
+      unknownSkuAutoOff: 0,
+    };
+
     type Update = { sku: string; patch?: Record<string, any>; current_quantity?: number };
     type Create = {
       item_name: string;
@@ -290,15 +320,15 @@ export default function CSV() {
       online_sale_price: number | null;
       seed: string;
       categories_paths?: string[];
+      extra?: Record<string, any>;   // add this
     };
-  
+
     const updates: Update[] = [];
     const creates: Array<Create & { sourceSku?: string }> = [];
     const ignored: string[] = [];
     const perSkuCategories: Record<string, string[]> = {};
     const uniquePaths = new Set<string>();
-  
-    // coercers
+
     const asYN = (v: unknown): "Y" | "N" | undefined => {
       const s = String(v ?? "").trim().toUpperCase();
       return s === "Y" || s === "N" ? s : undefined;
@@ -313,8 +343,7 @@ export default function CSV() {
       const n = Number(s);
       return Number.isFinite(n) ? n : null;
     };
-  
-    // normalized CSV keys -> item columns
+
     const FIELD_SPECS: Record<string, (v: unknown) => any> = {
       reference_handle: asStrOrNull,
       token: asStrOrNull,
@@ -347,9 +376,9 @@ export default function CSV() {
         const n = asNumOrNull(v);
         return n == null ? null : Math.trunc(n);
       },
-      modifier: asStrOrNull, // from "Modifier Set - Holographic" normalization
+      modifier: asStrOrNull,
     };
-  
+
     const buildPatchFromRow = (row: ParsedRow): Record<string, any> => {
       const patch: Record<string, any> = {};
       for (const [k, coerce] of Object.entries(FIELD_SPECS)) {
@@ -360,7 +389,7 @@ export default function CSV() {
       }
       return patch;
     };
-  
+
     const parsePaths = (raw: unknown): string[] => {
       const s = String(raw ?? "").trim();
       if (!s) return [];
@@ -377,14 +406,27 @@ export default function CSV() {
         )
         .filter(Boolean);
     };
-  
+
     for (const r of rows) {
       const rawSku = String(r["sku"] ?? "").trim();
-      const name = String(r["item_name"] ?? "").trim();
-  
+
+      // Try multiple possible name fields so we can auto-create more reliably
+      let name = String(r["item_name"] ?? "").trim();
+      if (!name) {
+        name = String(
+          r["name"] ??
+          r["title"] ??
+          r["variation_name"] ??
+          ""
+        ).trim();
+      }
+      // New: if there is truly no data in the row, skip it completely
+      const hasAnyData = Object.values(r).some((v) => String(v ?? "").trim() !== "");
+      if (!hasAnyData) continue;
       const paths = parsePaths(r["categories"]);
       for (const p of paths) uniquePaths.add(p);
-  
+
+
       // absolute quantity from New Quantity first, else Current Quantity
       let absQty: number | null = null;
       if (r["new_quantity"] != null && r["new_quantity"] !== "") {
@@ -394,11 +436,13 @@ export default function CSV() {
         const n2 = toNumberOrNull(r["current_quantity"]);
         if (n2 != null) absQty = Math.trunc(n2);
       }
-  
+
       if (rawSku) {
         const existing = inventory.get(rawSku);
         if (!existing) {
           if (name && autoCreate) {
+            const extra = buildPatchFromRow(r); // includes reference_handle, token, etc
+
             creates.push({
               item_name: name,
               description: r["description"] != null ? String(r["description"]) : null,
@@ -408,29 +452,34 @@ export default function CSV() {
               seed: clampSeed(name),
               categories_paths: paths,
               sourceSku: rawSku,
+              extra,
             });
           } else {
             ignored.push(rawSku);
           }
           continue;
         }
-  
+
+
+
         const patch = buildPatchFromRow(r);
         const u: Update = { sku: rawSku };
-  
+
         if (Object.keys(patch).length) u.patch = patch;
-  
+
         if (absQty != null) {
           const before = Number.isFinite(existing.current_quantity ?? NaN)
             ? Number(existing.current_quantity)
             : 0;
           if (absQty !== before) u.current_quantity = absQty;
         }
-  
+
         if (u.patch || u.current_quantity !== undefined) updates.push(u);
         if (paths.length) perSkuCategories[rawSku] = paths;
       } else {
         if (name && autoCreate) {
+          const extra = buildPatchFromRow(r);
+
           creates.push({
             item_name: name,
             description: r["description"] != null ? String(r["description"]) : null,
@@ -439,22 +488,25 @@ export default function CSV() {
             online_sale_price: asNumOrNull(r["online_sale_price"]),
             seed: clampSeed(name),
             categories_paths: paths,
+            extra,
           });
         } else {
           ignored.push("(missing SKU)");
         }
       }
+
+
     }
-  
+
     return {
       updates,
       creates,
       ignored,
       perSkuCategories,
       allPaths: Array.from(uniquePaths),
+      ignoredStats,
     };
   }
-  
 
   async function postBatches(updates: Array<{ sku: string; patch?: any; current_quantity?: number }>) {
     const CHUNK = 200;
@@ -475,61 +527,91 @@ export default function CSV() {
       if (!file) { setStatus("❌ Select a CSV file first."); return; }
       setStatus("⏳ Parsing CSV..."); setDetails("");
 
-      const text = await file.text();
+      const raw = await file.text();
 
-      // detect and persist Square username suffix once per file
-      const firstHeaderLine = text.split(/\r?\n/)[0] ?? "";
+      // Split into physical lines
+      const allLines = raw.split(/\r\n|\n|\r/);
+
+      // Find the first line that has at least one nonempty CSV cell
+      let headerIndex = -1;
+      for (let i = 0; i < allLines.length; i++) {
+        const line = allLines[i];
+        if (!line) continue;
+
+        const cells = splitCsvLine(line);
+        const hasRealCell = cells.some((c) => c.trim() !== "");
+        if (hasRealCell) {
+          headerIndex = i;
+          break;
+        }
+      }
+
+      if (headerIndex === -1) {
+        setStatus("❌ No header row found in CSV.");
+        return;
+      }
+
+      // Cleaned text starts from the real header row
+      const cleaned = allLines.slice(headerIndex).join("\n");
+
+      // Use the same header line for suffix detection
+      const firstHeaderLine = allLines[headerIndex] ?? "";
       const detected = detectSquareSuffix(firstHeaderLine);
       if (detected) {
-        const cleaned = detected.trim();
-        console.log("TEXMOE: " + cleaned)
-        squareSuffixRef.current = cleaned;
+        const cleanedSuffix = detected.trim();
+        console.log("TEXMOE: " + cleanedSuffix);
+        squareSuffixRef.current = cleanedSuffix;
         try {
-          await api("/auth/me", { method: "PATCH", json: { squareUsername: cleaned } });
-        } catch { console.warn("Failed to save square username"); }
+          await api("/auth/me", { method: "PATCH", json: { squareUsername: cleanedSuffix } });
+        } catch {
+          console.warn("Failed to save square username");
+        }
+      } else {
+        console.log("texty: " + firstHeaderLine);
       }
-      else console.log("texty: " + firstHeaderLine)
 
-      const rows = parseCsv(text);
+      const rows = parseCsv(cleaned);
       if (!rows.length) {
         setStatus("❌ No rows found.");
         return;
       }
 
+
       setStatus("⏳ Loading current inventory...");
       const inv = await fetchAllItems();
 
       setStatus("⏳ Planning changes...");
-      const { updates, creates, ignored, perSkuCategories } = planChanges(rows, inv);
+      const { updates, creates, ignored, perSkuCategories, ignoredStats } = planChanges(rows, inv);
 
-      // create new items first to make assignments stable
+      // create new items first
       if (creates.length) {
         setStatus(`⏳ Creating ${creates.length} new item(s)...`);
-        const prepared: Array<{
-          sku: string;
-          item_name: string;
-          description: string | null;
-          current_quantity: number;
-          price: number | null;
-          online_sale_price: number | null;
-        }> = [];
+        const prepared: Array<any> = [];
 
         let createdCount = 0;
         for (const c of creates) {
           const sku = formatSku(c.seed, createdCount);
-          prepared.push({
+
+          const base = {
             sku,
             item_name: c.item_name,
             description: c.description,
             current_quantity: c.current_quantity,
             price: c.price,
             online_sale_price: c.online_sale_price,
-          });
+          };
+
+          // Merge in extra fields like reference_handle, token, seo_title, etc
+          const full = c.extra ? { ...base, ...c.extra } : base;
+
+          prepared.push(full);
+
           if (c.categories_paths?.length) {
             perSkuCategories[sku] = c.categories_paths;
           }
           createdCount++;
         }
+
 
         const CHUNK = 200;
         for (let i = 0; i < prepared.length; i += CHUNK) {
@@ -596,7 +678,15 @@ export default function CSV() {
       if ((updates?.length ?? 0) > 0) summary.push(`Updated: ${updates.length}`);
       const catCount = Object.keys(perSkuCategories).length;
       if (catCount) summary.push(`Categorized: ${catCount}`);
-      if ((ignored?.length ?? 0) > 0) summary.push(`Ignored: ${ignored.length}`);
+      if ((ignored?.length ?? 0) > 0) {
+        summary.push(`Ignored: ${ignored.length}`);
+        summary.push(
+          `Ignored breakdown -> no SKU & no name: ${ignoredStats.noSkuNoName}, ` +
+          `SKU but no name: ${ignoredStats.skuButNoName}, ` +
+          `unknown SKU while auto-create off: ${ignoredStats.unknownSkuAutoOff}`
+        );
+      }
+
       setDetails(summary.join("\n"));
     } catch (e: any) {
       setStatus(`❌ Error: ${e?.message ?? "upload failed"}`);
@@ -609,12 +699,11 @@ export default function CSV() {
     try {
       setStatus("⏳ Building export...");
       setDetails("");
-  
-      // Username suffix for Square-style headers
+
       const squareUser = squareSuffixRef.current || squareUsername || "";
       const suffix = squareUser ? ` ${squareUser}` : "";
-  
-      // Exact header order required
+
+      // Exact header order to match Square
       const headers = [
         "Reference Handle",
         "Token",
@@ -652,30 +741,28 @@ export default function CSV() {
         `Stock Alert Count${suffix}`,
         "Modifier Set - Holographic",
       ];
-  
-      // Fetch all items and categories
+
+      // Fetch data
       const items = await fetchAllItemsFull();
-      const skus = items.map(i => i.sku).filter(Boolean);
+      const skus = items.map((i) => i.sku).filter(Boolean);
       let catsBySku: Record<string, string[]> = {};
       try {
         catsBySku = await fetchCategoryPathsForSkus(skus);
       } catch {
-        // If categories route missing, keep empty
         catsBySku = {};
       }
-  
+
       // Build CSV
       const lines: string[] = [];
       lines.push(headers.join(","));
-  
+
       for (const it of items) {
         const categoriesList = catsBySku[it.sku] ?? [];
         const categoriesStr = categoriesList.join(", ");
-      
-        // safe first path and leftmost segment
+
         const firstPath = categoriesList.length > 0 ? categoriesList[0] : "";
         const reportingCategory = firstPath ? firstPath.split(" > ")[0] : "";
-      
+
         const row = [
           it.reference_handle ?? "",
           it.token ?? "",
@@ -715,8 +802,7 @@ export default function CSV() {
         ];
         lines.push(row.map(csvCell).join(","));
       }
-      
-  
+
       const csv = lines.join("\n");
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -725,27 +811,24 @@ export default function CSV() {
       a.download = `xiiyta_items_export_${new Date().toISOString().slice(0, 10)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-  
+
       setStatus("✅ Export complete.");
       setDetails(`Exported ${items.length} item(s).`);
     } catch (err: any) {
       setStatus(`❌ Export failed: ${err?.message ?? "unknown error"}`);
     }
   };
-  
-  
-
 
   return (
     <div className="space-y-10">
-      <LoginModal
+      {/* <LoginModal
         open={showLogin}
         onClose={() => setShowLogin(false)}
         onSuccess={async () => {
           setShowLogin(false);
           await refresh();
         }}
-      />
+      /> */}
 
       <h1 className="text-3xl font-semibold">CSV Import</h1>
       <p className="text-neutral-500">Upload inventory data exported from Etsy or Square.</p>
@@ -767,7 +850,7 @@ export default function CSV() {
             checked={autoCreate}
             onChange={(e) => setAutoCreate(e.target.checked)}
           />
-          Auto create items for unknown or missing SKUs using auto-SKU
+          Auto create items for unknown or missing SKUs using auto SKU
         </label>
 
         <div className="flex gap-3">
@@ -789,12 +872,12 @@ export default function CSV() {
         {status && (
           <p
             className={`text-sm ${status.startsWith("✅")
-                ? "text-green-600"
-                : status.startsWith("⏳")
-                  ? "text-yellow-600"
-                  : status.startsWith("Info")
-                    ? "text-neutral-600"
-                    : "text-red-600"
+              ? "text-green-600"
+              : status.startsWith("⏳")
+                ? "text-yellow-600"
+                : status.startsWith("Info")
+                  ? "text-neutral-600"
+                  : "text-red-600"
               }`}
           >
             {status}

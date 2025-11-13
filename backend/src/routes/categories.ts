@@ -257,7 +257,8 @@ async function assertNoCycle(userId: number, currentId: number, newParentId?: nu
         err.status = 400;
         throw err;
     }
-    const rows: Array<{ category_id: number }> = await prisma.$queryRaw`
+    const rows = await prisma.$queryRaw<Array<{ category_id: number }>>`
+
     WITH RECURSIVE down AS (
       SELECT c.category_id, c.parent_category_id
       FROM "category" c
@@ -277,27 +278,63 @@ async function assertNoCycle(userId: number, currentId: number, newParentId?: nu
     }
 }
 
-router.get("/categories/list-for-export", requireAuth, async (req, res) => {
-    const userId = req.user!.user_id;
-    const rows = await prisma.category_item.findMany({
-        where: { user_id: userId },
-        include: {
-            category: {
-                select: { category_id: true, category_name: true, parent_category_id: true },
-            },
-        },
-    });
+// GET /categories/list-for-export
+// Returns { pairs: Array<{ sku: string; paths: string[] }> }
+// where each paths entry is "Parent > Child > Leaf"
+router.get("/list-for-export", async (req, res, next) => {
+    try {
+        const userId = req.user!.user_id;
 
-    // Build paths recursively or with a helper
-    const paths: Record<string, string[]> = {};
-    // ...reconstruct "Parent > Child" strings here
+        // All categories for the user
+        const cats = await prisma.category.findMany({
+            where: { user_id: userId },
+            select: { category_id: true, category_name: true, parent_category_id: true },
+        });
 
-    const pairs = Object.entries(paths).map(([sku, pathArr]) => ({
-        sku,
-        paths: pathArr,
-    }));
-    res.json({ pairs });
+        type Cat = { category_id: number; category_name: string; parent_category_id: number | null };
+        const byId = new Map<number, Cat>();
+        for (const c of cats) {
+            byId.set(c.category_id, {
+                category_id: c.category_id,
+                category_name: c.category_name,
+                parent_category_id: c.parent_category_id,
+            });
+        }
+
+        // Links from SKU to leaf category
+        const links = await prisma.category_item.findMany({
+            where: { user_id: userId },
+            select: { sku: true, category_id: true },
+        });
+
+        const paths: Record<string, string[]> = {};
+
+        for (const link of links) {
+            const sku = link.sku;
+            let cur = byId.get(link.category_id);
+            const names: string[] = [];
+            while (cur) {
+                names.push(cur.category_name);
+                cur = cur.parent_category_id != null ? byId.get(cur.parent_category_id) : undefined;
+            }
+            if (!names.length) continue;
+            names.reverse();
+            const pathStr = names.join(" > ");
+            if (!paths[sku]) paths[sku] = [];
+            paths[sku].push(pathStr);
+        }
+
+        const pairs = Object.entries(paths).map(([sku, pathArr]) => ({
+            sku,
+            paths: pathArr,
+        }));
+
+        res.json({ pairs });
+    } catch (err) {
+        next(err);
+    }
 });
+
 
 
 

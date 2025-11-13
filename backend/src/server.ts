@@ -10,9 +10,6 @@ import categoriesRouter from "./routes/categories";
 import logsRouter from "./routes/logs";
 
 const app = express();
-app.use(express.json());
-app.use(helmet());
-app.use(cookieParser(process.env.SESSION_SECRET));
 //app.use(cors());
 
 const raw = process.env.FRONTEND_ORIGINS || "http://localhost:5173";
@@ -26,6 +23,9 @@ app.use(cors({
   },
   credentials: true,
 }));
+app.use(express.json({ limit: "2mb" })); // or "5mb" if needed
+app.use(helmet());
+app.use(cookieParser(process.env.SESSION_SECRET));
   
 app.use("/auth", authRoutes);
 app.use("/items", itemsRouter);
