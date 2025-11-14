@@ -44,12 +44,12 @@ export default function Home() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5 }}
       >  
-        <NavLink
+        {/* <NavLink
           to="/dashboard"
           className="px-6 py-3 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition"
         >
           View Dashboard
-        </NavLink>
+        </NavLink> */}
         <NavLink
           to="/inventory"
           className="px-6 py-3 rounded-xl border text-sm font-medium hover:bg-neutral-50 transition"
