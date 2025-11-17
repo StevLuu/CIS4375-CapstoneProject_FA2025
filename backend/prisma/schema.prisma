@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+model category {
+  category_id        Int    @id @default(autoincrement())
+  user_id            Int
+  category_name      String @db.Citext // case-insensitive
+  parent_category_id Int?
+
+  // Relations
+  user user @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  // Parent-child within same user
+  parent        category?       @relation("CategoryToCategory", fields: [parent_category_id, user_id], references: [category_id, user_id], onUpdate: NoAction)
+  children      category[]      @relation("CategoryToCategory")
+  category_item category_item[]
+
+  // Constraints and indexes
+  @@unique([category_id, user_id], map: "ux_category_id_user") // lets others FK to (category_id, user_id)
+  @@index([user_id, parent_category_id], map: "idx_category_user_parent")
+  @@index([user_id, category_name], map: "idx_category_user_name")
+}
+
+model category_item {
+  category_id Int
+  sku         String @db.VarChar(50)
+  user_id     Int
+
+  // Relations (tenant-safe via composite FKs)
+  category category @relation(fields: [category_id, user_id], references: [category_id, user_id], onDelete: Cascade, onUpdate: NoAction)
+  item     item     @relation(fields: [sku, user_id], references: [sku, user_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([category_id, sku, user_id])
+  @@index([category_id, user_id], map: "idx_category_item_cat_user")
+  @@index([sku, user_id], map: "idx_category_item_item")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model item {
+  sku                           String          @db.VarChar(50)
+  user_id                       Int
+  reference_handle              String?         @db.VarChar(150)
+  token                         String?         @db.VarChar(50)
+  item_name                     String          @db.VarChar(150)
+  variation_name                String?         @db.VarChar(100)
+  description                   String?
+  seo_title                     String?         @db.VarChar(255)
+  seo_description               String?
+  permalink                     String?         @db.VarChar(255)
+  gtin                          String?         @db.VarChar(50)
+  square_online_item_visibility String?         @default("visible") @db.VarChar(20)
+  item_type                     String?         @db.VarChar(50)
+  social_media_link_title       String?         @db.VarChar(255)
+  social_media_link_description String?
+  shipping_enabled              String?         @default("N") @db.Char(1)
+  self_serve_ordering           String?         @default("N") @db.Char(1)
+  delivery_enabled              String?         @default("N") @db.Char(1)
+  pickup_enabled                String?         @default("N") @db.Char(1)
+  price                         Decimal?        @db.Decimal(10, 2)
+  online_sale_price             Decimal?        @db.Decimal(10, 2)
+  archived                      String?         @default("N") @db.Char(1)
+  sellable                      String?         @default("Y") @db.Char(1)
+  contains_alcohol              String?         @default("N") @db.Char(1)
+  stockable                     String?         @default("Y") @db.Char(1)
+  skip_detail_screen_in_pos     String?         @default("N") @db.Char(1)
+  option_name_1                 String?         @db.VarChar(100)
+  option_value_1                String?         @db.VarChar(100)
+  current_quantity              Int?            @default(0)
+  stock_alert_enabled           String?         @default("N") @db.Char(1)
+  stock_alert_count             Int?
+  modifier                      String?         @db.VarChar(100)
+  category_item                 category_item[]
+  user                          user            @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+  log_item                      log_item[]
+
+  @@id([sku, user_id])
+  @@index([user_id], map: "idx_item_user")
+  // TODO: add index on (user_id, archived) to accelerate archived filters later
+
+}
+
+model log {
+  log_id    Int        @id @default(autoincrement())
+  timestamp DateTime   @default(now()) @db.Timestamp(6)
+  user_id   Int
+  type      String?    @db.VarChar(100)
+  note      String?    @db.VarChar(500) // Optional note for readable context
+  user      user       @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction)
+  // log_item  log_item[] // removed to keeps logs durable after an item is deleted.
+  log_item  log_item[]
+
+  @@index([user_id, timestamp], map: "idx_log_user_ts")
+}
+
+model log_item {
+  log_id   Int
+  sku      String @db.VarChar(50)
+  user_id  Int
+  quantity Int    @default(0)
+
+  // only keep relation to log
+  log         log     @relation(fields: [log_id], references: [log_id], onDelete: Cascade, onUpdate: NoAction)
+  item        item?   @relation(fields: [itemSku, itemUser_id], references: [sku, user_id])
+  itemSku     String? @db.VarChar(50)
+  itemUser_id Int?
+
+  @@id([log_id, sku, user_id])
+  @@index([sku, user_id], map: "idx_log_item_item")
+}
+
+model user {
+  user_id        Int      @id @default(autoincrement())
+  squareUsername String?  @map("username") @db.VarChar(255)
+  password       String   @db.VarChar(255)
+  email          String   @unique @db.Citext
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+  updated_at     DateTime @default(now()) @db.Timestamp(6)
+
+  // existing relations
+  item item[]
+  log  log[]
+
+  // NEW: back-relation for category.user
+  category category[]
+
+  @@map("user")
+}
